@@ -3,3 +3,7 @@ main.js
 data.json
 obsidian-livesync/
 
+# Server — never commit credentials or CouchDB data
+server/.env
+server/data/
+

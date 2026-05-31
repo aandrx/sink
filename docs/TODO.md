@@ -1,119 +1,106 @@
 # Sink — Implementation TODO
 
 ## Phase 0: Project Setup
-- [ ] Initialize npm project with package.json
-- [ ] Configure tsconfig.json
-- [ ] Configure esbuild.config.mjs (build to main.js)
-- [ ] Create manifest.json for Obsidian
-- [ ] Create styles.css (minimal)
-- [ ] Verify build pipeline produces installable plugin files
+- [x] Initialize npm project with package.json
+- [x] Configure tsconfig.json
+- [x] Configure esbuild.config.mjs (build to main.js)
+- [x] Create manifest.json for Obsidian
+- [x] Create styles.css (minimal)
+- [x] Verify build pipeline produces installable plugin files
 
 ## Phase 1: Server Setup
-- [ ] Create `server/docker-compose.yml`
-- [ ] Create `server/local.ini` (CouchDB config with CORS, auth, max sizes)
-- [ ] Create `server/setup.sh` (initialize database + system DBs)
-- [ ] Create `server/.env.example` with placeholder credentials
-- [ ] Document: test server is reachable via Tailscale IP
+- [x] Create `server/docker-compose.yml`
+- [x] Create `server/local.ini` (CouchDB config with CORS, auth, max sizes)
+- [x] Create `server/setup.sh` (initialize database + system DBs)
+- [x] Create `server/.env.example` with placeholder credentials
+- [x] Document: test server is reachable via Tailscale IP
 
 ## Phase 2: Core Sync Engine
-- [ ] `src/settings.ts` — Define SinkSettings interface + DEFAULT_SETTINGS
-- [ ] `src/sync/LocalDB.ts` — PouchDB wrapper (init, destroy, get, put, allDocs)
-- [ ] `src/sync/RemoteDB.ts` — CouchDB connection (test connection, create DB if missing)
-- [ ] `src/sync/FileSerializer.ts` — Convert vault files to/from DB documents
-  - [ ] Small files (<64KB): store content directly in doc
-  - [ ] Large files (≥64KB): split into chunks, store chunk refs in header doc
-  - [ ] Handle binary files (base64 encoding)
-- [ ] `src/sync/Replicator.ts` — Continuous bidirectional replication
-  - [ ] Start/stop continuous replication
-  - [ ] Handle connection drops + auto-reconnect (exponential backoff)
-  - [ ] Change feed listener for incoming changes
-  - [ ] Debounced push on local changes
-- [ ] `src/sync/ConflictResolver.ts` — Conflict handling
-  - [ ] Detect conflicts from PouchDB revision tree
-  - [ ] Auto-resolve: identical content
-  - [ ] Auto-resolve: fast-forward (one side unchanged)
-  - [ ] Auto-resolve: 3-way text merge (diff-match-patch)
-  - [ ] Fallback: create .conflict file + notify user
-- [ ] `src/sync/SyncEngine.ts` — Orchestration layer
-  - [ ] Wire together LocalDB + RemoteDB + Replicator + ConflictResolver
-  - [ ] Vault event listeners (create, modify, delete, rename)
-  - [ ] DB change → vault write pipeline
-  - [ ] Vault change → DB write pipeline (with debounce)
+- [x] `src/settings.ts` — Define SinkSettings interface + DEFAULT_SETTINGS
+- [x] `src/sync/LocalDB.ts` — PouchDB wrapper (init, destroy, get, put, allDocs)
+- [x] `src/sync/RemoteDB.ts` — CouchDB connection (test connection, create DB if missing)
+- [x] `src/sync/FileSerializer.ts` — Convert vault files to/from DB documents
+  - [x] Small files (<64KB): store content directly in doc
+  - [x] Large files (≥64KB): split into chunks, store chunk refs in header doc
+  - [x] Handle binary files (base64 encoding)
+- [x] `src/sync/Replicator.ts` — Continuous bidirectional replication
+  - [x] Start/stop continuous replication
+  - [x] Handle connection drops + auto-reconnect (exponential backoff)
+  - [x] Change feed listener for incoming changes
+  - [x] Debounced push on local changes
+  - [x] Auth errors (401/403) stop replication instead of retrying (prevents credential flood)
+- [x] `src/sync/ConflictResolver.ts` — Conflict handling
+  - [x] Detect conflicts from PouchDB revision tree
+  - [x] Auto-resolve: identical content
+  - [x] Auto-resolve: fast-forward (one side unchanged)
+  - [x] Auto-resolve: 3-way text merge (diff-match-patch)
+  - [x] Fallback: manual resolution via ConflictModal
+- [x] `src/sync/SyncEngine.ts` — Orchestration layer
+  - [x] Wire together LocalDB + RemoteDB + Replicator + ConflictResolver
+  - [x] Vault event listeners (create, modify, delete, rename)
+  - [x] DB change → vault write pipeline
+  - [x] Vault change → DB write pipeline (with debounce)
 
 ## Phase 3: Encryption
-- [ ] `src/utils/crypto.ts` — E2E encryption module
-  - [ ] Key derivation from passphrase (PBKDF2)
-  - [ ] Encrypt document content (AES-256-GCM)
-  - [ ] Decrypt document content
-  - [ ] Encrypt/decrypt file paths (path obfuscation)
+- [x] `src/utils/crypto.ts` — E2E encryption module
+  - [x] Key derivation from passphrase (PBKDF2, 100k iterations, SHA-256)
+  - [x] Encrypt document content (AES-256-GCM, random 96-bit IV per document)
+  - [x] Decrypt document content
+  - [ ] Encrypt/decrypt file paths (path obfuscation) — not yet implemented
 
 ## Phase 4: Obsidian Plugin Integration
-- [ ] `src/SinkPlugin.ts` — Main plugin class
-  - [ ] `onload()` — initialize SyncEngine, register event handlers, add UI
-  - [ ] `onunload()` — stop replication, cleanup
-  - [ ] Register vault event listeners (on create/modify/delete/rename)
-  - [ ] Load/save settings to Obsidian data.json
-- [ ] `main.ts` — Entry point (thin wrapper exporting SinkPlugin as default)
+- [x] `src/SinkPlugin.ts` — Main plugin class
+  - [x] `onload()` — initialize SyncEngine, register event handlers, add UI
+  - [x] `onunload()` — stop replication, cleanup
+  - [x] Register vault event listeners (on create/modify/delete/rename)
+  - [x] Load/save settings to Obsidian data.json
+- [x] `main.ts` — Entry point (thin wrapper exporting SinkPlugin as default)
 
 ## Phase 5: UI
-- [ ] `src/ui/StatusBar.ts` — Sync status in bottom bar
-  - [ ] States: connected, syncing, error, offline
-  - [ ] Show upload/download counts
-- [ ] `src/ui/SettingsTab.ts` — Plugin settings page
-  - [ ] Server URL input
-  - [ ] Username + Password inputs
-  - [ ] Database name input
-  - [ ] Encryption passphrase input
-  - [ ] Sync delay slider
-  - [ ] Auto-resolve conflicts toggle
-  - [ ] Device name input
-  - [ ] "Test Connection" button
-  - [ ] "Generate Setup URI" button
-  - [ ] "Rebuild Local DB" button (emergency)
-- [ ] `src/ui/SetupWizard.ts` — First-run wizard (modal)
-  - [ ] Step 1: Enter server credentials + test connection
-  - [ ] Step 2: Choose direction (push to server / pull from server / merge)
-  - [ ] Step 3: Confirm + start initial sync
-  - [ ] Option: paste Setup URI instead of manual entry
-- [ ] `src/ui/ConflictModal.ts` — Manual conflict resolution
-  - [ ] Show diff between versions
-  - [ ] Choose: keep mine / keep theirs / manual edit
+- [x] `src/ui/StatusBar.ts` — Sync status in bottom bar
+  - [x] States: connected, syncing, error, disconnected, paused
+  - [x] Hover tooltip showing status detail
+- [x] `src/ui/FloatingStatus.ts` — Top-right floating overlay
+  - [x] Dynamic activity text (Filling/Draining + filename) with 4s revert
+  - [x] Color-coded by status (green/blue/red/muted)
+  - [x] Matches obsidian-livesync .livesync-status style
+- [x] `src/ui/SettingsTab.ts` — Plugin settings page (8 settings + actions)
+- [x] `src/ui/SetupWizard.ts` — First-run wizard (3 steps)
+- [x] `src/ui/ConflictModal.ts` — Manual conflict resolution (two-pane diff)
 
 ## Phase 6: Setup URI System
-- [ ] `src/utils/uri.ts` — URI generation and parsing
-  - [ ] Generate encrypted URI containing: server URL, username, password, DB name, encryption passphrase
-  - [ ] Parse URI and extract settings
-  - [ ] Register `obsidian://sink-setup` protocol handler
-  - [ ] Clipboard copy helper
+- [x] `src/utils/uri.ts` — URI generation and parsing
+  - [x] Generate URI containing: server URL, username, password, DB name, passphrase
+  - [x] Parse URI and extract settings
+  - [x] Register `obsidian://sink-setup` protocol handler
+  - [ ] URI encryption (currently base64 only — treat as sensitive, share via secure channel)
 
 ## Phase 7: Config Folder Sync
-- [ ] Handle `.obsidian/` folder sync
-  - [ ] Sync plugins, themes, snippets, workspace files
-  - [ ] Exclude `workspace.json` (device-specific)
-  - [ ] Exclude `.obsidian/plugins/sink/data.json` (device-specific settings)
-  - [ ] Prompt user before applying config changes from another device
+- [x] Handle `.obsidian/` folder sync (optional toggle)
+- [x] Exclude `.obsidian/plugins/sink/data.json` (device-specific settings)
+- [ ] Prompt user before applying config changes from another device
 
 ## Phase 8: Testing & Polish
-- [ ] Test: single device push/pull to empty CouchDB
-- [ ] Test: two devices syncing simultaneously
+- [x] Plugin loads without errors
+- [x] Live sync confirmed working between two devices
+- [x] Auth error flood prevention (401/403 stops replication)
 - [ ] Test: conflict generation and resolution
 - [ ] Test: large file (>64KB) sync
 - [ ] Test: binary file (image) sync
-- [ ] Test: connection drop and reconnection
-- [ ] Test: initial vault sync (large vault)
 - [ ] Test: Setup URI flow on second device
 - [ ] Test: encryption (verify CouchDB content is unreadable)
-- [ ] Clean up console logging (use Obsidian Notice for user-facing messages)
-- [ ] Final build → verify `main.js`, `manifest.json`, `styles.css` are correct
-- [ ] Install in actual vault and verify functionality
+- [ ] Test: mobile (iOS/Android) setup
 
 ## Phase 9: Documentation
-- [ ] README.md — Quick start guide
-  - [ ] Server setup instructions
-  - [ ] First device setup
-  - [ ] Additional device setup
-  - [ ] Troubleshooting common issues
-- [ ] Document CouchDB maintenance (compaction cron job)
+- [x] `docs/setup.md` — Full setup guide (server + desktop + mobile + friend access)
+- [x] `README.md` — Project overview and quick start
+- [x] CouchDB maintenance documented (compaction cron)
+
+## Known Limitations / Future Work
+- [ ] File path encryption (paths visible in CouchDB if no passphrase)
+- [ ] Setup URI is base64-only — share only via secure channel (Signal, etc.)
+- [ ] No per-user CouchDB accounts — all devices share one admin credential
+- [ ] Mobile requires manual plugin file transfer (not on community plugins list)
 
 ---
 

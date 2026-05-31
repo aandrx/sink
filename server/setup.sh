@@ -4,8 +4,12 @@
 
 set -e
 
+# Safely load .env without exposing credentials to process list
 if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
+  set -a
+  # shellcheck source=.env
+  source .env
+  set +a
 fi
 
 USER="${COUCHDB_USER:-admin}"
@@ -38,4 +42,4 @@ echo "Database:                 sink"
 echo "Fauxton UI (via Tailscale): http://$(tailscale ip -4 2>/dev/null || echo '<tailscale-ip>'):5985/_utils"
 echo ""
 echo "Use your Tailscale IP to connect from other devices:"
-echo "  http://<tailscale-ip>:5984"
+echo "  http://<tailscale-ip>:5985"
