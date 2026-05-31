@@ -151,6 +151,9 @@ export default class SinkPlugin extends Plugin {
         break;
       case "error":
         console.error("Sink sync error:", event.message);
+        if (event.message.includes("401") || event.message.includes("403") || event.message.includes("locked") || event.message.includes("forbidden")) {
+          new Notice("Sink: Authentication failed — check your username and password in settings.");
+        }
         break;
       case "conflict":
         if (!this.settings.autoResolveConflicts) {

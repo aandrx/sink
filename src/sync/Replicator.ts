@@ -64,7 +64,11 @@ export class Replicator {
     });
     this.pushReplication.on("error", (err: any) => {
       this.handler({ type: "error", error: err });
-      this.handleDisconnect();
+      if (this.isAuthError(err)) {
+        this.stop();
+      } else {
+        this.handleDisconnect();
+      }
     });
 
     // Pull: remote → local (continuous)
@@ -89,7 +93,11 @@ export class Replicator {
     });
     this.pullReplication.on("error", (err: any) => {
       this.handler({ type: "error", error: err });
-      this.handleDisconnect();
+      if (this.isAuthError(err)) {
+        this.stop();
+      } else {
+        this.handleDisconnect();
+      }
     });
 
     this.handler({ type: "status", status: "connected" });
@@ -111,6 +119,11 @@ export class Replicator {
       this.retryTimeout = null;
     }
     this.handler({ type: "status", status: "disconnected" });
+  }
+
+  /** Check if error is an auth failure (don't retry these) */
+  private isAuthError(err: any): boolean {
+    return err?.status === 401 || err?.status === 403;
   }
 
   /** Handle disconnect with exponential backoff retry */
