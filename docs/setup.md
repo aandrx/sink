@@ -75,7 +75,7 @@ Verify it's running:
 docker compose ps
 # Should show couchdb container as "running"
 
-curl http://localhost:5984/
+curl http://localhost:6000/
 # Should return: {"couchdb":"Welcome", ...}
 ```
 
@@ -101,7 +101,7 @@ Fauxton UI:  http://localhost:5984/_utils
 
 Open the Fauxton admin UI in a browser:
 ```
-http://localhost:5984/_utils
+http://localhost:6000/_utils
 ```
 
 Log in with the username/password from your `.env` file. You should see the `sink` database listed.
@@ -116,11 +116,11 @@ tailscale ip -4
 Verify it's accessible from another device on your tailnet:
 ```bash
 # From your laptop:
-curl http://100.64.1.23:5984/
+curl http://100.64.1.23:6000/
 # Should return the CouchDB welcome JSON
 ```
 
-That's your Server URL for the plugin: `http://100.64.1.23:5984`
+That's your Server URL for the plugin: `http://100.64.1.23:6000`
 
 ---
 
@@ -163,7 +163,7 @@ cp main.js manifest.json styles.css "$VAULT/.obsidian/plugins/sink/"
 ### 4. Configure in the Setup Wizard
 
 Enter:
-- **Server URL**: `http://<your-tailscale-ip>:5984` (e.g., `http://100.64.1.23:5984`)
+- **Server URL**: `http://<your-tailscale-ip>:6000` (e.g., `http://100.64.1.23:6000`)
 - **Username**: `admin` (or whatever you set in `.env`)
 - **Password**: your password from `.env`
 - **Database name**: `sink` (default)
@@ -211,7 +211,7 @@ CouchDB stores revision history which grows over time. Compact periodically:
 ```bash
 # Run on your server (or add to cron)
 source ~/docker/sink/.env
-curl -X POST "http://${COUCHDB_USER}:${COUCHDB_PASSWORD}@localhost:5984/sink/_compact" \
+curl -X POST "http://${COUCHDB_USER}:${COUCHDB_PASSWORD}@localhost:6000/sink/_compact" \
      -H "Content-Type: application/json"
 ```
 
@@ -219,7 +219,7 @@ To automate monthly:
 ```bash
 crontab -e
 # Add:
-0 3 1 * * source ~/docker/sink/.env && curl -sX POST "http://${COUCHDB_USER}:${COUCHDB_PASSWORD}@localhost:5984/sink/_compact" -H "Content-Type: application/json"
+0 3 1 * * source ~/docker/sink/.env && curl -sX POST "http://${COUCHDB_USER}:${COUCHDB_PASSWORD}@localhost:6000/sink/_compact" -H "Content-Type: application/json"
 ```
 
 ### Updating the plugin
@@ -244,7 +244,7 @@ tar czf ~/backups/sink-db-$(date +%Y%m%d).tar.gz -C ~/docker/sink data/
 
 | Problem | Fix |
 |---------|-----|
-| "Connection failed" | Check Tailscale is running, verify `curl http://<ip>:5984/` works |
+| "Connection failed" | Check Tailscale is running, verify `curl http://<ip>:6000/` works |
 | "Authentication failed" | Double-check username/password match your `.env` |
 | Plugin not appearing | Ensure all 3 files (`main.js`, `manifest.json`, `styles.css`) are in `.obsidian/plugins/sink/` |
 | Sync stops working | Try: Settings → Sink → Rebuild local database |

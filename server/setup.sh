@@ -16,10 +16,10 @@ if [ -z "$PASS" ]; then
   exit 1
 fi
 
-COUCH="http://${USER}:${PASS}@localhost:5984"
+COUCH="http://${USER}:${PASS}@localhost:6000"
 
 echo "Waiting for CouchDB to be ready..."
-until curl -sf "$COUCH/" > /dev/null 2>&1; do
+until curl -sf "http://localhost:6000/" > /dev/null 2>&1; do
   sleep 1
 done
 
@@ -33,9 +33,9 @@ curl -sf -X PUT "$COUCH/sink" > /dev/null 2>&1 || true
 
 echo ""
 echo "=== Sink server ready! ==="
-echo "CouchDB URL: http://localhost:5984"
+echo "CouchDB URL: http://localhost:6000"
 echo "Database:    sink"
-echo "Fauxton UI:  http://localhost:5984/_utils"
+echo "Fauxton UI:  http://localhost:6000/_utils"
 echo ""
 echo "Use your Tailscale IP to connect from other devices:"
 echo "  http://<tailscale-ip>:5984"
