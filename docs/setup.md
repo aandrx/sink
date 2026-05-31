@@ -75,12 +75,15 @@ Verify it's running — run this **on the server**:
 docker compose ps
 # Should show couchdb container as "running"
 
-curl http://localhost:6000/
+curl http://localhost:5985/
 # Should return: {"couchdb":"Welcome", ...}
 ```
 
 > **Note:** Your existing CouchDB on port 5984 is unaffected. Docker maps port 6000 on the host
 > to port 5984 inside this new container — they are fully isolated from each other.
+>
+> **Why not port 6000?** Browsers (Firefox, Chrome) block port 6000 at the network level
+> because it is traditionally reserved for X11. Port 5985 has no such restriction.
 
 ### 4. Initialize the database
 
@@ -96,9 +99,9 @@ Creating system databases...
 Creating sink database...
 
 === Sink server ready! ===
-CouchDB URL: http://localhost:6000
+CouchDB URL: http://localhost:5985
 Database:    sink
-Fauxton UI:  http://localhost:6000/_utils
+Fauxton UI:  http://localhost:5985/_utils
 ```
 
 ### 5. Verify access via Fauxton
@@ -107,12 +110,12 @@ Open the Fauxton admin UI in a browser. You have two options:
 
 **From any device on your Tailscale network** (your laptop — recommended):
 ```
-http://<server-tailscale-ip>:6000/_utils
+http://<server-tailscale-ip>:5985/_utils
 ```
 
 **From the server itself** (only if you have a browser on the server):
 ```
-http://localhost:6000/_utils
+http://localhost:5985/_utils
 ```
 
 Log in with the username/password from your `.env` file. You should see the `sink` database listed.
@@ -127,11 +130,11 @@ tailscale ip -4
 
 Verify it's reachable — run this **from your laptop**:
 ```bash
-curl http://100.64.1.23:6000/
+curl http://100.64.1.23:5985/
 # Should return: {"couchdb":"Welcome", ...}
 ```
 
-That's your Server URL for the plugin: `http://100.64.1.23:6000`
+That's your Server URL for the plugin: `http://100.64.1.23:5985`
 
 ---
 
@@ -174,7 +177,7 @@ cp main.js manifest.json styles.css "$VAULT/.obsidian/plugins/sink/"
 ### 4. Configure in the Setup Wizard
 
 Enter:
-- **Server URL**: `http://<your-tailscale-ip>:6000` (e.g., `http://100.64.1.23:6000`)
+- **Server URL**: `http://<your-tailscale-ip>:5985` (e.g., `http://100.64.1.23:5985`)
 - **Username**: `admin` (or whatever you set in `.env`)
 - **Password**: your password from `.env`
 - **Database name**: `sink` (default)
@@ -222,7 +225,7 @@ CouchDB stores revision history which grows over time. Compact periodically:
 ```bash
 # Run on your server (or add to cron)
 source ~/docker/sink/.env
-curl -X POST "http://${COUCHDB_USER}:${COUCHDB_PASSWORD}@localhost:6000/sink/_compact" \
+curl -X POST "http://${COUCHDB_USER}:${COUCHDB_PASSWORD}@localhost:5985/sink/_compact" \
      -H "Content-Type: application/json"
 ```
 
@@ -230,7 +233,7 @@ To automate monthly:
 ```bash
 crontab -e
 # Add:
-0 3 1 * * source ~/docker/sink/.env && curl -sX POST "http://${COUCHDB_USER}:${COUCHDB_PASSWORD}@localhost:6000/sink/_compact" -H "Content-Type: application/json"
+0 3 1 * * source ~/docker/sink/.env && curl -sX POST "http://${COUCHDB_USER}:${COUCHDB_PASSWORD}@localhost:5985/sink/_compact" -H "Content-Type: application/json"
 ```
 
 ### Updating the plugin
@@ -255,7 +258,7 @@ tar czf ~/backups/sink-db-$(date +%Y%m%d).tar.gz -C ~/docker/sink data/
 
 | Problem | Fix |
 |---------|-----|
-| "Connection failed" | Check Tailscale is running, verify `curl http://<ip>:6000/` works |
+| "Connection failed" | Check Tailscale is running, verify `curl http://<ip>:5985/` works |
 | "Authentication failed" | Double-check username/password match your `.env` |
 | Plugin not appearing | Ensure all 3 files (`main.js`, `manifest.json`, `styles.css`) are in `.obsidian/plugins/sink/` |
 | Sync stops working | Try: Settings → Sink → Rebuild local database |
