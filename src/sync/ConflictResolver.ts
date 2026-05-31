@@ -1,3 +1,4 @@
+import { diff_match_patch } from "diff-match-patch";
 import type { SinkDoc } from "../settings";
 
 /** Result of a conflict resolution attempt */
@@ -14,16 +15,10 @@ export interface MergeResult {
  * Falls back to "newer wins" for binary or failed merges.
  */
 export class ConflictResolver {
-  private dmp: any;
+  private dmp: diff_match_patch;
 
   constructor() {
-    // diff-match-patch is loaded dynamically to avoid bundling issues
-    try {
-      const DiffMatchPatch = require("diff-match-patch");
-      this.dmp = new DiffMatchPatch();
-    } catch {
-      this.dmp = null;
-    }
+    this.dmp = new diff_match_patch();
   }
 
   /**
@@ -72,8 +67,6 @@ export class ConflictResolver {
    * Returns merged content or null if merge has conflicts.
    */
   private attemptTextMerge(mineText: string, theirsText: string): string | null {
-    if (!this.dmp) return null;
-
     try {
       // Use diff-match-patch to compute patches from theirs against mine
       const diffs = this.dmp.diff_main(mineText, theirsText);

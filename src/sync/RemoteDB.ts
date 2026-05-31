@@ -1,10 +1,4 @@
-import PouchDB from "pouchdb-core";
-import httpAdapter from "pouchdb-adapter-http";
-import replication from "pouchdb-replication";
-
-PouchDB.plugin(httpAdapter);
-PouchDB.plugin(replication);
-
+import { PouchDB } from "./pouchdb";
 import type { SinkSettings, SinkDoc, SinkChunkDoc } from "../settings";
 
 export interface ConnectionTestResult {

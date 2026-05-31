@@ -1,15 +1,4 @@
-import PouchDB from "pouchdb-core";
-import idbAdapter from "pouchdb-adapter-idb";
-import httpAdapter from "pouchdb-adapter-http";
-import replication from "pouchdb-replication";
-import mapreduce from "pouchdb-mapreduce";
-
-// Register PouchDB plugins
-PouchDB.plugin(idbAdapter);
-PouchDB.plugin(httpAdapter);
-PouchDB.plugin(replication);
-PouchDB.plugin(mapreduce);
-
+import { PouchDB } from "./pouchdb";
 import type { SinkDoc, SinkChunkDoc } from "../settings";
 
 export class LocalDB {
