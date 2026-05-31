@@ -70,7 +70,7 @@ Pick something strong — this protects your entire vault's sync data.
 docker compose up -d
 ```
 
-Verify it's running:
+Verify it's running — run this **on the server**:
 ```bash
 docker compose ps
 # Should show couchdb container as "running"
@@ -79,8 +79,12 @@ curl http://localhost:6000/
 # Should return: {"couchdb":"Welcome", ...}
 ```
 
+> **Note:** Your existing CouchDB on port 5984 is unaffected. Docker maps port 6000 on the host
+> to port 5984 inside this new container — they are fully isolated from each other.
+
 ### 4. Initialize the database
 
+Run this **on the server**:
 ```bash
 bash setup.sh
 ```
@@ -92,14 +96,21 @@ Creating system databases...
 Creating sink database...
 
 === Sink server ready! ===
-CouchDB URL: http://localhost:5984
+CouchDB URL: http://localhost:6000
 Database:    sink
-Fauxton UI:  http://localhost:5984/_utils
+Fauxton UI:  http://localhost:6000/_utils
 ```
 
-### 5. Verify access
+### 5. Verify access via Fauxton
 
-Open the Fauxton admin UI in a browser:
+Open the Fauxton admin UI in a browser. You have two options:
+
+**From any device on your Tailscale network** (your laptop — recommended):
+```
+http://<server-tailscale-ip>:6000/_utils
+```
+
+**From the server itself** (only if you have a browser on the server):
 ```
 http://localhost:6000/_utils
 ```
@@ -108,16 +119,16 @@ Log in with the username/password from your `.env` file. You should see the `sin
 
 ### 6. Get your Tailscale IP
 
+Run this **on the server**:
 ```bash
 tailscale ip -4
 # Example output: 100.64.1.23
 ```
 
-Verify it's accessible from another device on your tailnet:
+Verify it's reachable — run this **from your laptop**:
 ```bash
-# From your laptop:
 curl http://100.64.1.23:6000/
-# Should return the CouchDB welcome JSON
+# Should return: {"couchdb":"Welcome", ...}
 ```
 
 That's your Server URL for the plugin: `http://100.64.1.23:6000`
