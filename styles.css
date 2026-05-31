@@ -1,0 +1,55 @@
+/* Sink - Minimal styles */
+
+.sink-status-syncing {
+  animation: sink-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes sink-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.sink-status-error {
+  color: var(--text-error);
+}
+
+.sink-status-connected {
+  color: var(--text-success);
+}
+
+.sink-conflict-modal .sink-diff-container {
+  display: flex;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.sink-conflict-modal .sink-diff-side {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.sink-setup-wizard .sink-step {
+  margin-bottom: 16px;
+}
+
+.sink-setup-wizard .sink-step-header {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.sink-setup-wizard .sink-uri-display {
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  padding: 8px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  word-break: break-all;
+  user-select: all;
+}

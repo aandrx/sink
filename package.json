@@ -1,0 +1,29 @@
+{
+  "name": "sink",
+  "version": "0.1.0",
+  "description": "Simplified Obsidian LiveSync plugin — always-on sync via CouchDB",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production"
+  },
+  "keywords": ["obsidian", "sync", "couchdb", "livesync"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/pouchdb-core": "^7.0.15",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.25.0",
+    "obsidian": "latest",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "diff-match-patch": "^1.0.5",
+    "pouchdb-core": "^9.0.0",
+    "pouchdb-adapter-idb": "^9.0.0",
+    "pouchdb-adapter-http": "^9.0.0",
+    "pouchdb-replication": "^9.0.0",
+    "pouchdb-mapreduce": "^9.0.0"
+  }
+}
