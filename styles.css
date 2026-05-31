@@ -1,21 +1,109 @@
 /* Sink - Minimal styles */
 
-/* --- Floating Status Overlay (top-right of workspace) --- */
+/* --- Floating Status Overlay --- */
+/* Matches obsidian-livesync .livesync-status style exactly */
 .sink-floating-status {
-  position: fixed;
-  top: 8px;
-  right: 12px;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+  user-select: none;
   pointer-events: none;
-  font-size: 11px;
-  font-family: var(--font-monospace);
-  opacity: 0.6;
-  transition: opacity 0.2s;
+  height: auto;
+  min-height: 1em;
+  position: absolute;
+  background-color: transparent;
+  width: 100%;
+  padding: 10px;
+  padding-right: 24px;
+  top: var(--header-height);
+  z-index: calc(var(--layer-cover) + 1);
+  font-variant-numeric: tabular-nums;
+  tab-size: 4;
+  text-align: right;
+  white-space: pre-wrap;
+  display: inline-block;
+  color: var(--text-normal);
+  font-size: 80%;
+  padding-top: 36px;
 }
+
+.sink-floating-status div {
+  opacity: 0.6;
+  -webkit-filter: grayscale(100%);
+  filter: grayscale(100%);
+}
+
+/* Color overrides — remove grayscale and apply status color */
+.sink-floating-status div.sink-floating-connected {
+  filter: none;
+  -webkit-filter: none;
+  color: var(--color-green);
+}
+.sink-floating-status div.sink-floating-syncing {
+  filter: none;
+  -webkit-filter: none;
+  color: var(--color-blue);
+}
+.sink-floating-status div.sink-floating-error {
+  filter: none;
+  -webkit-filter: none;
+  color: var(--text-error);
+  opacity: 0.85;
+}
+.sink-floating-status div.sink-floating-disconnected {
+  color: var(--text-faint);
+}
+
+/* --- Status Bar (bottom) --- */
+/* Uses Obsidian's native status bar styling (white text, correct font, etc.) */
+.sink-statusbar {
+  padding-right: 12px;
+  cursor: default;
+}
+
+@keyframes sink-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+/* --- Ribbon Icon --- */
+.sink-ribbon-connected svg    { color: var(--color-green) !important; stroke: var(--color-green) !important; }
+.sink-ribbon-syncing svg      { color: var(--color-blue) !important;  stroke: var(--color-blue) !important; animation: sink-spin 1s linear infinite; }
+.sink-ribbon-error svg        { color: var(--text-error) !important;  stroke: var(--text-error) !important; }
+.sink-ribbon-disconnected svg { opacity: 0.35; }
+
+@keyframes sink-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* --- Conflict Modal --- */
+.sink-conflict-modal .sink-diff-container {
+  display: flex;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.sink-conflict-modal .sink-diff-side {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+/* --- Setup Wizard --- */
+.sink-setup-wizard .sink-uri-display {
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  padding: 8px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  word-break: break-all;
+  user-select: all;
+}
+
 
 .sink-floating-status:hover {
   opacity: 1;

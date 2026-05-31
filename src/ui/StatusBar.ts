@@ -1,10 +1,9 @@
 import type { SyncStatus } from "../settings";
+import { setTooltip } from "obsidian";
 
 export class StatusBar {
   private el: HTMLElement;
   private status: SyncStatus = "disconnected";
-  private lastFile: string | null = null;
-  private clearFileTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(statusBarEl: HTMLElement) {
     this.el = statusBarEl;
@@ -17,65 +16,28 @@ export class StatusBar {
     this.render();
   }
 
-  setActiveFile(path: string, direction: "push" | "pull"): void {
-    // Show just the filename, not the full path
-    const filename = path.split("/").pop() ?? path;
-    this.lastFile = `${direction === "push" ? "↑" : "↓"} ${filename}`;
-
-    if (this.clearFileTimer) clearTimeout(this.clearFileTimer);
-    this.clearFileTimer = setTimeout(() => {
-      this.lastFile = null;
-      this.render();
-    }, 3000);
-
-    this.render();
-  }
+  // No-op — file activity is shown in the floating overlay instead
+  setActiveFile(_path: string, _direction: "push" | "pull"): void {}
 
   private render(): void {
-    this.el.empty();
-    this.el.removeClass("sink-status-syncing", "sink-status-error", "sink-status-connected");
-
-    const icon = this.getIcon();
-    const label = this.getLabel();
-    const fileHint = this.lastFile ? ` · ${this.lastFile}` : "";
-
-    this.el.setText(`${icon} ${label}${fileHint}`);
-
-    switch (this.status) {
-      case "syncing":
-        this.el.addClass("sink-status-syncing");
-        break;
-      case "error":
-        this.el.addClass("sink-status-error");
-        break;
-      case "connected":
-        this.el.addClass("sink-status-connected");
-        break;
-    }
-
-    this.el.setAttribute("aria-label", `Sink: ${label}`);
-  }
-
-  private getIcon(): string {
-    switch (this.status) {
-      case "connected":    return "●";
-      case "syncing":      return "↻";
-      case "error":        return "✖";
-      case "paused":       return "⏸";
-      case "disconnected": return "○";
-      default:             return "○";
-    }
-  }
-
-  private getLabel(): string {
-    switch (this.status) {
-      case "connected":    return "Sink";
-      case "syncing":      return "Syncing";
-      case "error":        return "Sink (error)";
-      case "paused":       return "Sink (paused)";
-      case "disconnected": return "Sink (off)";
-      default:             return "Sink";
-    }
+    const labels: Record<SyncStatus, string> = {
+      connected:    "Sink",
+      syncing:      "Sink ↑↓",
+      error:        "Sink ✗",
+      paused:       "Sink ⏸",
+      disconnected: "Sink ○",
+    };
+    const tooltips: Record<SyncStatus, string> = {
+      connected:    "Sink: Live sync active",
+      syncing:      "Sink: Syncing changes",
+      error:        "Sink: Sync error, check credentials",
+      paused:       "Sink: Sync paused",
+      disconnected: "Sink: Not connected to server",
+    };
+    const text = labels[this.status] ?? "Sink";
+    const tip  = tooltips[this.status] ?? "Sink";
+    this.el.setText(text);
+    setTooltip(this.el, tip, { placement: "top" });
   }
 }
 
