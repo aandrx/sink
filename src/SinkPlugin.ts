@@ -2,6 +2,7 @@ import { Plugin, Notice, TFile, type TAbstractFile } from "obsidian";
 import { SyncEngine } from "./sync/SyncEngine";
 import { SinkSettingsTab } from "./ui/SettingsTab";
 import { StatusBar, RibbonIcon } from "./ui/StatusBar";
+import { FloatingStatus } from "./ui/FloatingStatus";
 import { SetupWizard } from "./ui/SetupWizard";
 import { ConflictModal } from "./ui/ConflictModal";
 import { parseSetupURI, applySetupPayload } from "./utils/uri";
@@ -12,6 +13,7 @@ export default class SinkPlugin extends Plugin {
   private syncEngine: SyncEngine | null = null;
   private statusBar: StatusBar | null = null;
   private ribbonIcon: RibbonIcon | null = null;
+  private floatingStatus: FloatingStatus | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -53,6 +55,12 @@ export default class SinkPlugin extends Plugin {
       }
     });
 
+    // Floating status overlay — inject once workspace is ready
+    this.app.workspace.onLayoutReady(() => {
+      const workspaceEl = this.app.workspace.containerEl;
+      this.floatingStatus = new FloatingStatus(workspaceEl);
+    });
+
     // If configured, start syncing
     if (this.settings.isConfigured) {
       await this.startSync();
@@ -91,6 +99,7 @@ export default class SinkPlugin extends Plugin {
   }
 
   async onunload() {
+    this.floatingStatus?.destroy();
     await this.stopSync();
   }
 
@@ -166,12 +175,15 @@ export default class SinkPlugin extends Plugin {
       case "status-change":
         this.statusBar?.setStatus(event.status as SyncStatus);
         this.ribbonIcon?.update(event.status as SyncStatus);
+        this.floatingStatus?.setStatus(event.status as SyncStatus);
         break;
       case "doc-pushed":
         this.statusBar?.setActiveFile(event.path, "push");
+        this.floatingStatus?.showActivity(event.path, "push");
         break;
       case "doc-pulled":
         this.statusBar?.setActiveFile(event.path, "pull");
+        this.floatingStatus?.showActivity(event.path, "pull");
         break;
       case "error":
         console.error("Sink sync error:", event.message);

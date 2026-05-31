@@ -1,5 +1,44 @@
 /* Sink - Minimal styles */
 
+/* --- Floating Status Overlay (top-right of workspace) --- */
+.sink-floating-status {
+  position: fixed;
+  top: 8px;
+  right: 12px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  pointer-events: none;
+  font-size: 11px;
+  font-family: var(--font-monospace);
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.sink-floating-status:hover {
+  opacity: 1;
+}
+
+.sink-floating-message {
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: opacity 0.4s;
+}
+
+.sink-floating-message-hidden {
+  opacity: 0;
+}
+
+.sink-floating-syncing .sink-floating-message {
+  color: var(--color-blue);
+}
+
+.sink-floating-error .sink-floating-message {
+  color: var(--text-error);
+}
+
 /* --- Status Bar --- */
 .sink-statusbar {
   cursor: default;
@@ -48,6 +87,46 @@
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+
+/* --- Conflict Modal --- */
+.sink-conflict-modal .sink-diff-container {
+  display: flex;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.sink-conflict-modal .sink-diff-side {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+/* --- Setup Wizard --- */
+.sink-setup-wizard .sink-step {
+  margin-bottom: 16px;
+}
+
+.sink-setup-wizard .sink-step-header {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.sink-setup-wizard .sink-uri-display {
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  padding: 8px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  word-break: break-all;
+  user-select: all;
+}
+
 
 .sink-conflict-modal .sink-diff-container {
   display: flex;
