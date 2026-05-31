@@ -1,7 +1,7 @@
 import { Plugin, Notice, TFile, type TAbstractFile } from "obsidian";
 import { SyncEngine } from "./sync/SyncEngine";
 import { SinkSettingsTab } from "./ui/SettingsTab";
-import { StatusBar } from "./ui/StatusBar";
+import { StatusBar, RibbonIcon } from "./ui/StatusBar";
 import { SetupWizard } from "./ui/SetupWizard";
 import { ConflictModal } from "./ui/ConflictModal";
 import { parseSetupURI, applySetupPayload } from "./utils/uri";
@@ -11,6 +11,7 @@ export default class SinkPlugin extends Plugin {
   settings: SinkSettings = DEFAULT_SETTINGS;
   private syncEngine: SyncEngine | null = null;
   private statusBar: StatusBar | null = null;
+  private ribbonIcon: RibbonIcon | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -20,6 +21,22 @@ export default class SinkPlugin extends Plugin {
 
     // Add status bar
     this.statusBar = new StatusBar(this.addStatusBarItem());
+
+    // Add ribbon icon (left sidebar)
+    const ribbonEl = this.addRibbonIcon("refresh-cw", "Sink", async () => {
+      if (this.syncEngine) {
+        new Notice("Sink: Syncing now...");
+        try {
+          await this.syncEngine.pullServerToVault();
+          new Notice("Sink: Done");
+        } catch (e: any) {
+          new Notice(`Sink: Sync failed — ${e.message}`);
+        }
+      } else {
+        new SetupWizard(this.app, this, "fresh").open();
+      }
+    });
+    this.ribbonIcon = new RibbonIcon(ribbonEl);
 
     // Register URI handler for setup
     this.registerObsidianProtocolHandler("sink-setup", (params) => {
@@ -148,6 +165,13 @@ export default class SinkPlugin extends Plugin {
     switch (event.type) {
       case "status-change":
         this.statusBar?.setStatus(event.status as SyncStatus);
+        this.ribbonIcon?.update(event.status as SyncStatus);
+        break;
+      case "doc-pushed":
+        this.statusBar?.setActiveFile(event.path, "push");
+        break;
+      case "doc-pulled":
+        this.statusBar?.setActiveFile(event.path, "pull");
         break;
       case "error":
         console.error("Sink sync error:", event.message);

@@ -1,12 +1,18 @@
 /* Sink - Minimal styles */
 
+/* --- Status Bar --- */
+.sink-statusbar {
+  cursor: default;
+  font-size: var(--font-smaller);
+}
+
 .sink-status-syncing {
-  animation: sink-pulse 1.5s ease-in-out infinite;
+  animation: sink-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes sink-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  50% { opacity: 0.4; }
 }
 
 .sink-status-error {
@@ -14,7 +20,33 @@
 }
 
 .sink-status-connected {
-  color: var(--text-success);
+  color: var(--color-green);
+}
+
+/* --- Ribbon Icon --- */
+.sink-ribbon-connected svg {
+  color: var(--color-green) !important;
+  stroke: var(--color-green) !important;
+}
+
+.sink-ribbon-syncing svg {
+  color: var(--color-blue) !important;
+  stroke: var(--color-blue) !important;
+  animation: sink-spin 1s linear infinite;
+}
+
+.sink-ribbon-error svg {
+  color: var(--text-error) !important;
+  stroke: var(--text-error) !important;
+}
+
+.sink-ribbon-disconnected svg {
+  opacity: 0.4;
+}
+
+@keyframes sink-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
 .sink-conflict-modal .sink-diff-container {
