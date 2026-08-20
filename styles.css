@@ -24,6 +24,13 @@
   padding-top: 36px;
 }
 
+/* On mobile, account for the safe area (Dynamic Island / notch) plus the
+   extra toolbar row Obsidian adds. env(safe-area-inset-top) is provided by
+   iOS/Android and reflects the exact hardware cutout height for the device. */
+.is-mobile .sink-floating-status {
+  padding-top: calc(env(safe-area-inset-top, 20px) + 60px);
+}
+
 .sink-floating-status div {
   opacity: 0.6;
   -webkit-filter: grayscale(100%);
@@ -102,6 +109,33 @@
   border-radius: 4px;
   word-break: break-all;
   user-select: all;
+}
+
+/* Progress display during initial sync */
+.sink-progress-count {
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  margin-bottom: 4px;
+}
+
+.sink-progress-file {
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Error detail on the Setup Failed screen */
+.sink-error-detail {
+  color: var(--text-error);
+  background: var(--background-modifier-error);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: var(--font-ui-small);
 }
 
 
