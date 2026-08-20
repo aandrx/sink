@@ -28,7 +28,7 @@
    extra toolbar row Obsidian adds. env(safe-area-inset-top) is provided by
    iOS/Android and reflects the exact hardware cutout height for the device. */
 .is-mobile .sink-floating-status {
-  padding-top: calc(env(safe-area-inset-top, 20px) + 60px);
+  padding-top: calc(env(safe-area-inset-top, 20px) + 44px);
 }
 
 .sink-floating-status div {
