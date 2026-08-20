@@ -56,6 +56,8 @@ tailscale ip -4
 ```bash
 git clone https://github.com/aandrx/sink.git ~/sink
 cd ~/sink && npm install && npm run build
+# Note: npm install is required before building — it fetches the `events`
+# polyfill that makes the plugin load on mobile (iOS/Android).
 
 VAULT="$HOME/Documents/MyVault"
 mkdir -p "$VAULT/.obsidian/plugins/sink"

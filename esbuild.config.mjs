@@ -2,6 +2,10 @@ import esbuild from "esbuild";
 import process from "process";
 import builtins from "builtin-modules";
 
+// "events" is used by PouchDB internals. We bundle the browser-compatible
+// polyfill instead of leaving it as a bare require() that breaks on mobile.
+const externals = builtins.filter((m) => m !== "events");
+
 const production = process.argv[2] === "production";
 
 const context = await esbuild.context({
@@ -21,7 +25,7 @@ const context = await esbuild.context({
     "@lezer/common",
     "@lezer/highlight",
     "@lezer/lr",
-    ...builtins,
+    ...externals,
   ],
   format: "cjs",
   target: "es2018",

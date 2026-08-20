@@ -8,6 +8,7 @@ import { ConflictResolver } from "./ConflictResolver";
 import { CryptoHelper } from "../utils/crypto";
 
 export type SyncEventHandler = (event: SyncEvent) => void;
+export type SyncProgressCallback = (path: string, done: number, total: number) => void;
 
 export class SyncEngine {
   private vault: Vault;
@@ -233,34 +234,40 @@ export class SyncEngine {
   }
 
   /** Perform initial full sync (push local vault to server) */
-  async pushVaultToServer(): Promise<number> {
-    const files = this.vault.getFiles();
+  async pushVaultToServer(onProgress?: SyncProgressCallback): Promise<number> {
+    const files = this.vault.getFiles().filter((f) => {
+      if (!this.settings.syncConfigFolder && f.path.startsWith(".obsidian/")) return false;
+      if (f.path === ".obsidian/plugins/sink/data.json") return false;
+      return true;
+    });
+    const total = files.length;
     let count = 0;
     for (const file of files) {
-      if (!this.settings.syncConfigFolder && file.path.startsWith(".obsidian/")) continue;
-      if (file.path === ".obsidian/plugins/sink/data.json") continue;
-
       await this.pushFile(file);
       count++;
+      onProgress?.(file.path, count, total);
     }
     return count;
   }
 
   /** Pull all docs from remote and write to vault */
-  async pullServerToVault(): Promise<number> {
-    // First do a one-shot pull
+  async pullServerToVault(onProgress?: SyncProgressCallback): Promise<number> {
+    // First do a one-shot pull (remote → local DB)
     if (this.replicator) {
       await this.replicator.pullOnce();
     }
 
-    // Then read all file docs from local DB and write them
+    // Then read all file docs from local DB and write them to the vault
     const result = await this.localDB.allDocs();
+    const rows = result.rows.filter((row) => {
+      const doc = row.doc as SinkDoc;
+      return doc && doc.type === "file" && !doc.deleted;
+    });
+    const total = rows.length;
     let count = 0;
 
-    for (const row of result.rows) {
+    for (const row of rows) {
       const doc = row.doc as SinkDoc;
-      if (!doc || doc.type !== "file" || doc.deleted) continue;
-
       let processedDoc = doc;
       if (this.crypto && doc.iv) {
         processedDoc = await this.decryptDoc(doc);
@@ -270,6 +277,7 @@ export class SyncEngine {
       await this.serializer.docToFile(processedDoc);
       this.processing.delete(processedDoc.path);
       count++;
+      onProgress?.(processedDoc.path, count, total);
     }
     return count;
   }

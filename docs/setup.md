@@ -151,6 +151,8 @@ npm run build
 
 This produces `main.js` in the project root.
 
+> **Note:** `npm install` is required before every build — it installs the `events` browser polyfill that PouchDB needs to load correctly on mobile (iOS/Android). Skipping it will result in a "failed to load plugin" error on mobile even though desktop works fine.
+
 ### 2. Install the plugin
 
 ```bash

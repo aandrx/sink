@@ -5,11 +5,46 @@ import { RemoteDB } from "../sync/RemoteDB";
 
 type SetupMode = "fresh" | "imported" | "manual";
 
+/** Convert a raw error into a user-readable explanation */
+function describeError(e: any): string {
+  const msg: string = e?.message ?? String(e);
+  const status: number | undefined = e?.status;
+
+  if (status === 401 || msg.includes("401") || msg.toLowerCase().includes("unauthorized")) {
+    return "Authentication failed — check your username and password.";
+  }
+  if (status === 403 || msg.includes("403") || msg.toLowerCase().includes("forbidden")) {
+    return "Access denied — your account may not have permission to access this database.";
+  }
+  if (status === 404 || msg.includes("404")) {
+    return "Database not found — check your server URL and database name.";
+  }
+  if (
+    e?.name === "TypeError" ||
+    msg.toLowerCase().includes("failed to fetch") ||
+    msg.toLowerCase().includes("networkerror") ||
+    msg.toLowerCase().includes("network request failed") ||
+    msg.toLowerCase().includes("econnrefused") ||
+    msg.toLowerCase().includes("enotfound")
+  ) {
+    return "Cannot reach server — verify the URL is correct, the server is running, and Tailscale is connected on this device.";
+  }
+  if (msg.toLowerCase().includes("decrypt") || msg.toLowerCase().includes("cipher") || msg.toLowerCase().includes("crypto")) {
+    return "Decryption failed — make sure your encryption passphrase is identical on all devices.";
+  }
+  if (msg.toLowerCase().includes("timeout") || msg.toLowerCase().includes("timed out")) {
+    return "Connection timed out — the server may be unreachable or overloaded.";
+  }
+  return msg || "An unexpected error occurred.";
+}
+
 export class SetupWizard extends Modal {
   private plugin: SinkPlugin;
   private mode: SetupMode;
   private step: number = 1;
   private setupUri: string = "";
+  private progressCountEl: HTMLElement | null = null;
+  private progressFileEl: HTMLElement | null = null;
 
   constructor(app: App, plugin: SinkPlugin, mode: SetupMode) {
     super(app);
@@ -229,7 +264,23 @@ export class SetupWizard extends Modal {
   private renderStep3(): void {
     const { contentEl } = this;
     contentEl.createEl("h2", { text: "Syncing..." });
-    contentEl.createEl("p", { text: "Please wait while the initial sync completes." });
+    contentEl.createEl("p", {
+      text: "Please wait while the initial sync completes.",
+      cls: "setting-item-description",
+    });
+    this.progressCountEl = contentEl.createEl("p", { cls: "sink-progress-count", text: "Preparing…" });
+    this.progressFileEl = contentEl.createEl("p", { cls: "sink-progress-file" });
+  }
+
+  /** Update the live progress display during sync */
+  private updateProgress(path: string, done: number, total: number): void {
+    const filename = path.split("/").pop() ?? path;
+    if (this.progressCountEl) {
+      this.progressCountEl.setText(`${done} / ${total} files`);
+    }
+    if (this.progressFileEl) {
+      this.progressFileEl.setText(filename);
+    }
   }
 
   /** Perform the initial sync based on user choice */
@@ -245,22 +296,28 @@ export class SetupWizard extends Modal {
       const engine = this.plugin.getSyncEngine();
       if (!engine) throw new Error("Sync engine failed to start");
 
+      const progress = (path: string, done: number, total: number) =>
+        this.updateProgress(path, done, total);
+
       let count = 0;
       switch (direction) {
         case "push":
-          count = await engine.pushVaultToServer();
+          count = await engine.pushVaultToServer(progress);
           new Notice(`Sink: Pushed ${count} files to server`);
           break;
         case "pull":
-          count = await engine.pullServerToVault();
+          if (this.progressCountEl) this.progressCountEl.setText("Fetching from server…");
+          count = await engine.pullServerToVault(progress);
           new Notice(`Sink: Pulled ${count} files from server`);
           break;
-        case "merge":
-          // Push first, then pull (merge = bidirectional)
-          count = await engine.pushVaultToServer();
-          const pulled = await engine.pullServerToVault();
+        case "merge": {
+          count = await engine.pushVaultToServer(progress);
+          if (this.progressCountEl) this.progressCountEl.setText("Fetching from server…");
+          const pulled = await engine.pullServerToVault(progress);
           new Notice(`Sink: Pushed ${count}, pulled ${pulled} files`);
+          count += pulled;
           break;
+        }
       }
 
       // Update step 3 to show completion
@@ -280,7 +337,7 @@ export class SetupWizard extends Modal {
       const { contentEl } = this;
       contentEl.empty();
       contentEl.createEl("h2", { text: "Setup Failed" });
-      contentEl.createEl("p", { text: `Error: ${e.message}` });
+      contentEl.createEl("p", { text: describeError(e), cls: "sink-error-detail" });
       new Setting(contentEl).addButton((btn) =>
         btn.setButtonText("← Back").onClick(() => {
           this.step = 1;
