@@ -61,7 +61,7 @@ export class LocalDB {
     const result = await this.db.allDocs({ include_docs: true });
     type DeviceDoc = DeviceMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta;
     return result.rows
-      .map((row: PouchDB.Core.AllDocsRow<SinkStoredDoc>) => row.doc)
+      .map((row: { doc?: SinkStoredDoc }) => row.doc)
       .filter((doc: SinkStoredDoc | undefined): doc is DeviceDoc => {
         return !!doc && doc.type === "meta" && (doc as DeviceMetaDoc).metaType === "device";
       });
@@ -88,7 +88,7 @@ export class LocalDB {
     const result = await this.db.allDocs({ include_docs: true });
     type SnapshotDoc = SnapshotMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta;
     const snapshots = result.rows
-      .map((row: PouchDB.Core.AllDocsRow<SinkStoredDoc>) => row.doc)
+      .map((row: { doc?: SinkStoredDoc }) => row.doc)
       .filter((doc: SinkStoredDoc | undefined): doc is SnapshotDoc => {
         return !!doc && doc.type === "meta" && (doc as SnapshotMetaDoc).metaType === "snapshot";
       })
