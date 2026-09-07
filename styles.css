@@ -37,6 +37,12 @@
   filter: grayscale(100%);
 }
 
+.sink-floating-status .sink-floating-status-detail {
+  font-size: 75%;
+  margin-top: 2px;
+  opacity: 0.5;
+}
+
 /* Color overrides — remove grayscale and apply status color */
 .sink-floating-status div.sink-floating-connected {
   filter: none;

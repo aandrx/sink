@@ -296,11 +296,9 @@ export class SinkSettingsTab extends PluginSettingTab {
     const engine = this.plugin.getSyncEngine();
     if (!engine) return;
 
-    const devices = await engine.getKnownDevices();
+    const devices = await engine.refreshKnownDevices();
     const current = devices.find((device) => device.isCurrentDevice);
-    if (current) {
-      dropdown.value = current.role;
-    }
+    dropdown.value = current?.role ?? (await engine.getCurrentDeviceRole());
   }
 
   private async renderKnownDevices(container: HTMLElement, infoEl: HTMLElement, refresh: boolean): Promise<void> {
@@ -325,19 +323,23 @@ export class SinkSettingsTab extends PluginSettingTab {
   private renderDeviceRow(container: HTMLElement, engine: SyncEngine, device: KnownDevice): void {
     const status = device.isActive ? "active" : "stale";
     const current = device.isCurrentDevice ? "This device" : "Remote device";
+    const version = device.pluginVersion ?? "unknown";
     const lastSeen = this.formatTimestamp(device.lastSeen);
     const lastPush = this.formatTimestamp(device.lastPushAt);
     const lastPull = this.formatTimestamp(device.lastPullAt);
 
     new Setting(container)
       .setName(`${device.deviceName} (${device.role})`)
-      .setDesc(`${current} • ${status} • last seen ${lastSeen} • last push ${lastPush} • last pull ${lastPull}`)
+      .setDesc(`${current} • v${version} • ${status} • last seen ${lastSeen} • last push ${lastPush} • last pull ${lastPull}`)
       .addButton((btn) =>
         btn
           .setButtonText("Primary")
           .setDisabled(device.role === "primary")
           .onClick(async () => {
             await engine.setDeviceRole(device.deviceId, "primary");
+            if (device.isCurrentDevice) {
+              await this.plugin.refreshRibbonState();
+            }
             new Notice(`${device.deviceName} marked primary`);
             this.display();
           })
@@ -348,6 +350,9 @@ export class SinkSettingsTab extends PluginSettingTab {
           .setDisabled(device.role === "secondary")
           .onClick(async () => {
             await engine.setDeviceRole(device.deviceId, "secondary");
+            if (device.isCurrentDevice) {
+              await this.plugin.refreshRibbonState();
+            }
             new Notice(`${device.deviceName} marked secondary`);
             this.display();
           })

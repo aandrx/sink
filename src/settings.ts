@@ -70,6 +70,7 @@ export interface DeviceMetaDoc {
   metaType: "device";
   deviceId: string;
   deviceName: string;
+  pluginVersion?: string;
   role: DeviceRole;
   vaultName: string;
   lastSeen: number;
@@ -142,6 +143,7 @@ export type SinkStoredDoc = SinkDoc | SinkChunkDoc | DeviceMetaDoc | SnapshotMet
 export interface KnownDevice {
   deviceId: string;
   deviceName: string;
+  pluginVersion?: string;
   role: DeviceRole;
   vaultName: string;
   lastSeen: number;
@@ -158,6 +160,6 @@ export type SyncStatus = "disconnected" | "connected" | "syncing" | "error" | "p
 export type SyncEvent =
   | { type: "status-change"; status: SyncStatus }
   | { type: "doc-pushed"; path: string }
-  | { type: "doc-pulled"; path: string }
+  | { type: "doc-pulled"; path: string; sourceDevice?: string; sourceDeviceId?: string }
   | { type: "conflict"; path: string }
   | { type: "error"; message: string };

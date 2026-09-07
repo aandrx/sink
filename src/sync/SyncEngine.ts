@@ -47,6 +47,7 @@ export class SyncEngine {
   private vault: Vault;
   private settings: SinkSettings;
   private vaultName: string;
+  private pluginVersion: string;
   private localDB: LocalDB;
   private remoteDB: RemoteDB;
   private replicator: Replicator | null = null;
@@ -64,11 +65,12 @@ export class SyncEngine {
   private sessionMergeAllowed = false;
   private remoteHeadState: "head" | "behind" = "head";
 
-  constructor(app: App, vault: Vault, settings: SinkSettings, vaultName: string, handler: SyncEventHandler) {
+  constructor(app: App, vault: Vault, settings: SinkSettings, vaultName: string, pluginVersion: string, handler: SyncEventHandler) {
     this.app = app;
     this.vault = vault;
     this.settings = settings;
     this.vaultName = vaultName;
+    this.pluginVersion = pluginVersion;
     this.handler = handler;
     this.localDB = new LocalDB(vaultName);
     this.remoteDB = new RemoteDB(settings);
@@ -460,6 +462,7 @@ export class SyncEngine {
       .map((doc) => ({
         deviceId: doc.deviceId,
         deviceName: doc.deviceName,
+        pluginVersion: doc.pluginVersion,
         role: doc.role,
         vaultName: doc.vaultName,
         lastSeen: doc.lastSeen,
@@ -489,6 +492,7 @@ export class SyncEngine {
       metaType: "device",
       deviceId,
       deviceName: existing?.deviceName ?? (deviceId === this.settings.deviceId ? this.settings.deviceName : deviceId),
+      pluginVersion: existing?.pluginVersion ?? (deviceId === this.settings.deviceId ? this.pluginVersion : undefined),
       role,
       vaultName: existing?.vaultName ?? this.vaultName,
       lastSeen: existing?.lastSeen ?? now,
@@ -535,6 +539,11 @@ export class SyncEngine {
   }
 
   private async ensurePushAllowed(action: string): Promise<boolean> {
+    const versionAllowed = await this.ensureVersionCompatible(action);
+    if (!versionAllowed) {
+      return false;
+    }
+
     if (this.sessionMergeAllowed) {
       return true;
     }
@@ -665,6 +674,10 @@ export class SyncEngine {
     onApplied?: () => void
   ): Promise<number> {
     if (changes.length === 0) return 0;
+
+    if (!(await this.ensureVersionCompatible("apply incoming changes"))) {
+      return 0;
+    }
 
     const needsReview = await this.shouldReviewBatch(changes);
     const review = needsReview
@@ -797,7 +810,12 @@ export class SyncEngine {
     try {
       await this.serializer.docToFile(change.remoteDoc);
       await this.upsertDeviceRecord({ lastPullAt: Date.now() });
-      this.handler({ type: "doc-pulled", path: change.path });
+      this.handler({
+        type: "doc-pulled",
+        path: change.path,
+        sourceDevice: change.sourceDevice,
+        sourceDeviceId: change.sourceDeviceId,
+      });
     } finally {
       setTimeout(() => this.processing.delete(change.path), 500);
     }
@@ -963,6 +981,7 @@ export class SyncEngine {
       metaType: "device",
       deviceId: this.settings.deviceId,
       deviceName: this.settings.deviceName || this.settings.deviceId,
+      pluginVersion: this.pluginVersion,
       role: overrides.role ?? existing?.role ?? "primary",
       vaultName: this.vaultName,
       lastSeen: overrides.lastSeen ?? now,
@@ -1012,5 +1031,36 @@ export class SyncEngine {
     } catch {
       // Ignore storage failures; settings persistence still keeps the current identity.
     }
+  }
+
+  private async ensureVersionCompatible(action: string): Promise<boolean> {
+    const role = await this.getCurrentDeviceRole();
+    if (role === "primary") {
+      return true;
+    }
+
+    const devices = await this.getKnownDevices();
+    const primary = devices.find((device) => device.role === "primary");
+    if (!primary) {
+      return true;
+    }
+
+    if (!primary.pluginVersion) {
+      this.handler({
+        type: "error",
+        message: `Version gate blocked ${action}: primary device (${primary.deviceName}) is on an older Sink that does not report version. Update primary first.`,
+      });
+      return false;
+    }
+
+    if (primary.pluginVersion !== this.pluginVersion) {
+      this.handler({
+        type: "error",
+        message: `Version gate blocked ${action}: this device is ${this.pluginVersion}, primary (${primary.deviceName}) is ${primary.pluginVersion}.`,
+      });
+      return false;
+    }
+
+    return true;
   }
 }

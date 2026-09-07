@@ -119,6 +119,7 @@ export default class SinkPlugin extends Plugin {
       this.app.vault,
       this.settings,
       this.app.vault.getName(),
+      this.manifest.version,
       (event) => this.handleSyncEvent(event)
     );
 
@@ -189,7 +190,7 @@ export default class SinkPlugin extends Plugin {
         break;
       case "doc-pulled":
         this.statusBar?.setActiveFile(event.path, "pull");
-        this.floatingStatus?.showActivity(event.path, "pull");
+        this.floatingStatus?.showActivity(event.path, "pull", event.sourceDevice);
         break;
       case "error":
         console.error("Sink sync error:", event.message);

@@ -8,6 +8,7 @@ import type { SyncStatus } from "../settings";
 export class FloatingStatus {
   private el: HTMLElement;
   private textEl: HTMLElement;
+  private detailEl: HTMLElement;
   private status: SyncStatus = "disconnected";
   private revertTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -15,6 +16,7 @@ export class FloatingStatus {
     this.el = workspaceEl.createDiv({ cls: "sink-floating-status" });
     // Child div matches obsidian-livesync pattern: inner div gets opacity+grayscale from CSS
     this.textEl = this.el.createDiv();
+    this.detailEl = this.el.createDiv({ cls: "sink-floating-status-detail" });
     this.renderIdle();
   }
 
@@ -26,10 +28,11 @@ export class FloatingStatus {
     }
   }
 
-  showActivity(path: string, direction: "push" | "pull"): void {
+  showActivity(path: string, direction: "push" | "pull", sourceDevice?: string): void {
     const filename = path.split("/").pop() ?? path;
     const verb = direction === "push" ? "Draining" : "Filling";
     this.textEl.setText(`${verb}  ${filename}`);
+    this.detailEl.setText(direction === "pull" && sourceDevice ? `From ${sourceDevice}` : "");
     this.applyColor(direction === "push" ? "syncing" : "connected");
 
     // Reset any existing revert timer
@@ -49,6 +52,7 @@ export class FloatingStatus {
       disconnected: "Empty",
     };
     this.textEl.setText(labels[this.status] ?? "Sink");
+    this.detailEl.setText("");
     this.applyColor(this.status);
   }
 
