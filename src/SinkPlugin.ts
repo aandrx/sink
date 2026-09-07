@@ -112,10 +112,16 @@ export default class SinkPlugin extends Plugin {
     // Default device name to a generated one
     if (!this.settings.deviceName) {
       this.settings.deviceName = `device-${Date.now().toString(36)}`;
+    }
+    if (!this.settings.deviceId) {
+      this.settings.deviceId = crypto.randomUUID();
+    }
+    if (!this.settings.deviceName || !this.settings.deviceId) {
       await this.saveSettings();
     }
 
     this.syncEngine = new SyncEngine(
+      this.app,
       this.app.vault,
       this.settings,
       this.app.vault.getName(),

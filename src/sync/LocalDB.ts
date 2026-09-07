@@ -1,8 +1,8 @@
 import { PouchDB } from "./pouchdb";
-import type { SinkDoc, SinkChunkDoc } from "../settings";
+import type { DeviceMetaDoc, SinkDoc, SinkStoredDoc, SnapshotMetaDoc } from "../settings";
 
 export class LocalDB {
-  private db: PouchDB.Database<SinkDoc | SinkChunkDoc>;
+  private db: PouchDB.Database<SinkStoredDoc>;
   private dbName: string;
 
   constructor(vaultName: string) {
@@ -10,15 +10,15 @@ export class LocalDB {
     this.db = new PouchDB(this.dbName, { adapter: "idb" });
   }
 
-  get instance(): PouchDB.Database<SinkDoc | SinkChunkDoc> {
+  get instance(): PouchDB.Database<SinkStoredDoc> {
     return this.db;
   }
 
-  async get(id: string): Promise<(SinkDoc | SinkChunkDoc) & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta> {
+  async get(id: string): Promise<SinkStoredDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta> {
     return await this.db.get(id);
   }
 
-  async put(doc: SinkDoc | SinkChunkDoc): Promise<PouchDB.Core.Response> {
+  async put(doc: SinkStoredDoc): Promise<PouchDB.Core.Response> {
     return await this.db.put(doc);
   }
 
@@ -26,7 +26,7 @@ export class LocalDB {
     return await this.db.remove(doc);
   }
 
-  async allDocs(options?: PouchDB.Core.AllDocsOptions): Promise<PouchDB.Core.AllDocsResponse<SinkDoc | SinkChunkDoc>> {
+  async allDocs(options?: PouchDB.Core.AllDocsOptions): Promise<PouchDB.Core.AllDocsResponse<SinkStoredDoc>> {
     return await this.db.allDocs({ include_docs: true, ...options });
   }
 
@@ -42,6 +42,59 @@ export class LocalDB {
 
   async destroy(): Promise<void> {
     await this.db.destroy();
+  }
+
+  async getDeviceDoc(deviceId: string): Promise<(DeviceMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta) | null> {
+    try {
+      const doc = await this.db.get(this.deviceMetaId(deviceId));
+      if (doc.type === "meta" && (doc as DeviceMetaDoc).metaType === "device") {
+        return doc as DeviceMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta;
+      }
+      return null;
+    } catch (e: any) {
+      if (e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  async getAllDeviceDocs(): Promise<Array<DeviceMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta>> {
+    const result = await this.db.allDocs({ include_docs: true });
+    type DeviceDoc = DeviceMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta;
+    return result.rows
+      .map((row: PouchDB.Core.AllDocsRow<SinkStoredDoc>) => row.doc)
+      .filter((doc: SinkStoredDoc | undefined): doc is DeviceDoc => {
+        return !!doc && doc.type === "meta" && (doc as DeviceMetaDoc).metaType === "device";
+      });
+  }
+
+  async putSnapshotDoc(doc: SnapshotMetaDoc): Promise<PouchDB.Core.Response> {
+    return await this.db.put(doc);
+  }
+
+  async getSnapshotDoc(snapshotId: string): Promise<(SnapshotMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta) | null> {
+    try {
+      const doc = await this.db.get(this.snapshotMetaId(snapshotId));
+      if (doc.type === "meta" && (doc as SnapshotMetaDoc).metaType === "snapshot") {
+        return doc as SnapshotMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta;
+      }
+      return null;
+    } catch (e: any) {
+      if (e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  async getSnapshotDocs(limit = 20): Promise<Array<SnapshotMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta>> {
+    const result = await this.db.allDocs({ include_docs: true });
+    type SnapshotDoc = SnapshotMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta;
+    const snapshots = result.rows
+      .map((row: PouchDB.Core.AllDocsRow<SinkStoredDoc>) => row.doc)
+      .filter((doc: SinkStoredDoc | undefined): doc is SnapshotDoc => {
+        return !!doc && doc.type === "meta" && (doc as SnapshotMetaDoc).metaType === "snapshot";
+      })
+      .sort((left: SnapshotDoc, right: SnapshotDoc) => right.createdAt - left.createdAt);
+
+    return snapshots.slice(0, limit);
   }
 
   async info(): Promise<PouchDB.Core.DatabaseInfo> {
@@ -66,5 +119,13 @@ export class LocalDB {
   /** Generate a chunk ID from content hash */
   chunkId(hash: string): string {
     return "chunk:" + hash;
+  }
+
+  deviceMetaId(deviceId: string): string {
+    return "meta:device:" + deviceId;
+  }
+
+  snapshotMetaId(snapshotId: string): string {
+    return "meta:snapshot:" + snapshotId;
   }
 }

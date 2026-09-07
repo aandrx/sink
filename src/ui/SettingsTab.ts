@@ -1,5 +1,7 @@
 import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import type SinkPlugin from "../SinkPlugin";
+import type { DeviceRole, KnownDevice, SnapshotSummary } from "../settings";
+import type { SyncEngine } from "../sync/SyncEngine";
 import { generateSetupURI } from "../utils/uri";
 import { SetupWizard } from "./SetupWizard";
 
@@ -168,6 +170,63 @@ export class SinkSettingsTab extends PluginSettingTab {
           })
       );
 
+    const roleSetting = new Setting(containerEl)
+      .setName("This device role")
+      .setDesc("Primary devices can upload immediately. Secondary devices must confirm before uploading changes.");
+
+    roleSetting.addDropdown((dropdown) => {
+      dropdown
+        .addOption("primary", "Primary")
+        .addOption("secondary", "Secondary")
+        .setValue("primary")
+        .onChange(async (value) => {
+          const engine = this.plugin.getSyncEngine();
+          if (!engine || !this.plugin.settings.deviceId) return;
+
+          await engine.setDeviceRole(this.plugin.settings.deviceId, value as DeviceRole);
+          new Notice(`Device role set to ${value}`);
+          this.display();
+        });
+
+      void this.populateCurrentRole(dropdown);
+    });
+
+    containerEl.createEl("h2", { text: "Known Devices" });
+    const devicesInfo = containerEl.createEl("p", {
+      text: "Devices are tracked by synced registry docs. Primary devices are listed first.",
+      cls: "setting-item-description",
+    });
+    const devicesContainer = containerEl.createDiv();
+
+    new Setting(containerEl)
+      .setName("Refresh device list")
+      .setDesc("Pull the latest device registry from the server")
+      .addButton((btn) =>
+        btn.setButtonText("Refresh").onClick(async () => {
+          await this.renderKnownDevices(devicesContainer, devicesInfo, true);
+        })
+      );
+
+    void this.renderKnownDevices(devicesContainer, devicesInfo, false);
+
+    containerEl.createEl("h2", { text: "Backups" });
+    const backupInfo = containerEl.createEl("p", {
+      text: "Risky sync batches now create restore points. Use these to roll back local files.",
+      cls: "setting-item-description",
+    });
+    const backupContainer = containerEl.createDiv();
+
+    new Setting(containerEl)
+      .setName("Refresh snapshots")
+      .setDesc("Show recent restore points")
+      .addButton((btn) =>
+        btn.setButtonText("Refresh").onClick(async () => {
+          await this.renderSnapshots(backupContainer, backupInfo);
+        })
+      );
+
+    void this.renderSnapshots(backupContainer, backupInfo);
+
     // --- Actions Section ---
     containerEl.createEl("h2", { text: "Actions" });
 
@@ -204,5 +263,107 @@ export class SinkSettingsTab extends PluginSettingTab {
           }
         })
       );
+  }
+
+  private async populateCurrentRole(dropdown: HTMLSelectElement): Promise<void> {
+    const engine = this.plugin.getSyncEngine();
+    if (!engine) return;
+
+    const devices = await engine.getKnownDevices();
+    const current = devices.find((device) => device.isCurrentDevice);
+    if (current) {
+      dropdown.value = current.role;
+    }
+  }
+
+  private async renderKnownDevices(container: HTMLElement, infoEl: HTMLElement, refresh: boolean): Promise<void> {
+    container.empty();
+    const engine = this.plugin.getSyncEngine();
+
+    if (!engine) {
+      infoEl.setText("Start sync on this device to load and manage the registry.");
+      return;
+    }
+
+    const devices = refresh ? await engine.refreshKnownDevices() : await engine.getKnownDevices();
+    if (devices.length === 0) {
+      infoEl.setText("No devices are registered yet. The current device will appear after its first heartbeat.");
+      return;
+    }
+
+    infoEl.setText("Known devices are sorted by role, then by most recent activity.");
+    devices.forEach((device) => this.renderDeviceRow(container, engine, device));
+  }
+
+  private renderDeviceRow(container: HTMLElement, engine: SyncEngine, device: KnownDevice): void {
+    const status = device.isActive ? "active" : "stale";
+    const current = device.isCurrentDevice ? "This device" : "Remote device";
+    const lastSeen = this.formatTimestamp(device.lastSeen);
+    const lastPush = this.formatTimestamp(device.lastPushAt);
+    const lastPull = this.formatTimestamp(device.lastPullAt);
+
+    new Setting(container)
+      .setName(`${device.deviceName} (${device.role})`)
+      .setDesc(`${current} • ${status} • last seen ${lastSeen} • last push ${lastPush} • last pull ${lastPull}`)
+      .addButton((btn) =>
+        btn
+          .setButtonText("Make Primary")
+          .setDisabled(device.role === "primary")
+          .onClick(async () => {
+            await engine.setDeviceRole(device.deviceId, "primary");
+            new Notice(`${device.deviceName} marked primary`);
+            this.display();
+          })
+      )
+      .addButton((btn) =>
+        btn
+          .setButtonText("Make Secondary")
+          .setDisabled(device.role === "secondary")
+          .onClick(async () => {
+            await engine.setDeviceRole(device.deviceId, "secondary");
+            new Notice(`${device.deviceName} marked secondary`);
+            this.display();
+          })
+      );
+  }
+
+  private async renderSnapshots(container: HTMLElement, infoEl: HTMLElement): Promise<void> {
+    container.empty();
+    const engine = this.plugin.getSyncEngine();
+    if (!engine) {
+      infoEl.setText("Start sync on this device to view restore points.");
+      return;
+    }
+
+    const snapshots = await engine.listSnapshots(15);
+    if (snapshots.length === 0) {
+      infoEl.setText("No restore points found yet.");
+      return;
+    }
+
+    infoEl.setText("Restore points are local safety snapshots taken before risky batches are applied.");
+    snapshots.forEach((snapshot) => this.renderSnapshotRow(container, engine, snapshot));
+  }
+
+  private renderSnapshotRow(container: HTMLElement, engine: SyncEngine, snapshot: SnapshotSummary): void {
+    new Setting(container)
+      .setName(`${this.formatTimestamp(snapshot.createdAt)} (${snapshot.fileCount} files)`)
+      .setDesc(snapshot.reason)
+      .addButton((btn) =>
+        btn.setButtonText("Restore").setWarning().onClick(async () => {
+          const ok = window.confirm(
+            `Restore snapshot from ${this.formatTimestamp(snapshot.createdAt)} affecting ${snapshot.fileCount} files?`
+          );
+          if (!ok) return;
+
+          const restored = await engine.restoreSnapshot(snapshot.id);
+          new Notice(`Sink: Restored ${restored} files from snapshot`);
+        })
+      );
+  }
+
+  private formatTimestamp(value?: number): string {
+    if (!value) return "never";
+    return new Date(value).toLocaleString();
   }
 }

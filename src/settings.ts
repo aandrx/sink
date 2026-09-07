@@ -15,6 +15,8 @@ export interface SinkSettings {
   autoResolveConflicts: boolean;
   /** Friendly name for this device */
   deviceName: string;
+  /** Stable ID for this device across restarts */
+  deviceId: string;
   /** Whether initial setup has been completed */
   isConfigured: boolean;
   /** Sync .obsidian/ config folder */
@@ -30,9 +32,14 @@ export const DEFAULT_SETTINGS: SinkSettings = {
   syncDelay: 1000,
   autoResolveConflicts: true,
   deviceName: "",
+  deviceId: "",
   isConfigured: false,
   syncConfigFolder: true,
 };
+
+export type DeviceRole = "primary" | "secondary";
+
+export type ChangeDecision = "keep-local" | "keep-remote" | "merge" | "skip";
 
 /** Document stored in CouchDB representing a vault file */
 export interface SinkDoc {
@@ -54,12 +61,92 @@ export interface SinkDoc {
   type: "file" | "chunk" | "meta";
 }
 
+export interface DeviceMetaDoc {
+  _id: string;
+  _rev?: string;
+  type: "meta";
+  metaType: "device";
+  deviceId: string;
+  deviceName: string;
+  role: DeviceRole;
+  vaultName: string;
+  lastSeen: number;
+  lastPushAt?: number;
+  lastPullAt?: number;
+}
+
+export interface SnapshotFileEntry {
+  path: string;
+  existed: boolean;
+  isBinary: boolean;
+  content: string;
+  mtime?: number;
+  ctime?: number;
+}
+
+export interface SnapshotMetaDoc {
+  _id: string;
+  _rev?: string;
+  type: "meta";
+  metaType: "snapshot";
+  createdAt: number;
+  reason: string;
+  sourceDevice: string;
+  files: SnapshotFileEntry[];
+}
+
+export interface PendingChange {
+  path: string;
+  sourceDevice: string;
+  sourceDeviceId?: string;
+  remoteMtime: number;
+  localMtime?: number;
+  remoteDeleted: boolean;
+  localExists: boolean;
+  localContent?: string;
+  remoteContent?: string;
+  isBinary: boolean;
+  suggested: ChangeDecision;
+}
+
+export interface ReviewedChange {
+  path: string;
+  selected: boolean;
+  decision: ChangeDecision;
+}
+
+export interface ReviewResult {
+  approved: boolean;
+  decisions: ReviewedChange[];
+}
+
+export interface SnapshotSummary {
+  id: string;
+  createdAt: number;
+  reason: string;
+  fileCount: number;
+}
+
 /** Chunk document for large files */
 export interface SinkChunkDoc {
   _id: string;
   _rev?: string;
   type: "chunk";
   data: string;
+}
+
+export type SinkStoredDoc = SinkDoc | SinkChunkDoc | DeviceMetaDoc | SnapshotMetaDoc;
+
+export interface KnownDevice {
+  deviceId: string;
+  deviceName: string;
+  role: DeviceRole;
+  vaultName: string;
+  lastSeen: number;
+  lastPushAt?: number;
+  lastPullAt?: number;
+  isActive: boolean;
+  isCurrentDevice: boolean;
 }
 
 /** Sync status for the status bar */
