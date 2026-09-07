@@ -2,6 +2,7 @@ import { App, Modal, PluginSettingTab, Setting, Notice, TFile } from "obsidian";
 import type SinkPlugin from "../SinkPlugin";
 import type { DeviceRole, KnownDevice, SnapshotFileEntry, SnapshotMetaDoc, SnapshotSummary } from "../settings";
 import type { SyncEngine } from "../sync/SyncEngine";
+import { renderSplitDiff } from "./DiffView";
 import { generateSetupURI } from "../utils/uri";
 import { SetupWizard } from "./SetupWizard";
 
@@ -158,7 +159,7 @@ export class SinkSettingsTab extends PluginSettingTab {
     if (engine) {
       new Setting(containerEl)
         .setName("Session merge allowance")
-        .setDesc("Allow merges without extra prompts until Obsidian closes or Sink stops.")
+        .setDesc("Allow merges for this Obsidian session without extra prompts until Sink stops or Obsidian closes.")
         .addButton((btn) =>
           btn
             .setButtonText(engine.isSessionMergeAllowed ? "Disable for session" : "Allow merges for this session")
@@ -169,7 +170,7 @@ export class SinkSettingsTab extends PluginSettingTab {
 
               if (currentEngine.isSessionMergeAllowed) {
                 currentEngine.clearSessionMergeAllowance();
-                new Notice("Session merge prompts re-enabled");
+                new Notice("Session merge prompts re-enabled for this Obsidian session");
               } else {
                 currentEngine.allowMergesForSession();
                 new Notice("Session merge prompts disabled for this Obsidian session");
@@ -209,6 +210,7 @@ export class SinkSettingsTab extends PluginSettingTab {
           if (!engine || !this.plugin.settings.deviceId) return;
 
           await engine.setDeviceRole(this.plugin.settings.deviceId, value as DeviceRole);
+          await this.plugin.refreshRibbonState();
           new Notice(`Device role set to ${value}`);
           this.display();
         });
@@ -332,7 +334,7 @@ export class SinkSettingsTab extends PluginSettingTab {
       .setDesc(`${current} • ${status} • last seen ${lastSeen} • last push ${lastPush} • last pull ${lastPull}`)
       .addButton((btn) =>
         btn
-          .setButtonText("Make Primary")
+          .setButtonText("Primary")
           .setDisabled(device.role === "primary")
           .onClick(async () => {
             await engine.setDeviceRole(device.deviceId, "primary");
@@ -342,7 +344,7 @@ export class SinkSettingsTab extends PluginSettingTab {
       )
       .addButton((btn) =>
         btn
-          .setButtonText("Make Secondary")
+          .setButtonText("Secondary")
           .setDisabled(device.role === "secondary")
           .onClick(async () => {
             await engine.setDeviceRole(device.deviceId, "secondary");
@@ -504,22 +506,7 @@ export class SinkSettingsTab extends PluginSettingTab {
         return;
       }
 
-      const wrapper = contentEl.createDiv({ cls: "sink-diff-split" });
-      const leftPane = wrapper.createDiv({ cls: "sink-diff-pane sink-diff-left" });
-      const rightPane = wrapper.createDiv({ cls: "sink-diff-pane sink-diff-right" });
-      leftPane.createEl("h4", { text: "Current" });
-      rightPane.createEl("h4", { text: "Snapshot" });
-
-      const rows = this.buildSplitDiff(currentText, snapshotText);
-      for (const row of rows) {
-        const leftRow = leftPane.createDiv({ cls: `sink-diff-row sink-diff-${row.kind}` });
-        leftRow.createDiv({ cls: "sink-diff-line-number", text: row.leftNumber ?? "" });
-        leftRow.createDiv({ cls: "sink-diff-line-text", text: row.leftText ?? "" });
-
-        const rightRow = rightPane.createDiv({ cls: `sink-diff-row sink-diff-${row.kind}` });
-        rightRow.createDiv({ cls: "sink-diff-line-number", text: row.rightNumber ?? "" });
-        rightRow.createDiv({ cls: "sink-diff-line-text", text: row.rightText ?? "" });
-      }
+      renderSplitDiff(contentEl, "Current", "Snapshot", currentText, snapshotText);
     };
 
     modal.open();
@@ -533,107 +520,6 @@ export class SinkSettingsTab extends PluginSettingTab {
       return this.arrayBufferToBase64(buffer);
     }
     return await this.app.vault.read(current);
-  }
-
-  private buildSplitDiff(leftText: string, rightText: string): Array<{
-    kind: "equal" | "delete" | "insert" | "change";
-    leftNumber?: string;
-    leftText?: string;
-    rightNumber?: string;
-    rightText?: string;
-  }> {
-    const leftLines = leftText.split(/\r?\n/);
-    const rightLines = rightText.split(/\r?\n/);
-    const rows: Array<{
-      kind: "equal" | "delete" | "insert" | "change";
-      leftNumber?: string;
-      leftText?: string;
-      rightNumber?: string;
-      rightText?: string;
-    }> = [];
-
-    let leftIndex = 0;
-    let rightIndex = 0;
-
-    while (leftIndex < leftLines.length || rightIndex < rightLines.length) {
-      const leftLine = leftLines[leftIndex];
-      const rightLine = rightLines[rightIndex];
-
-      if (leftLine === rightLine) {
-        rows.push({
-          kind: "equal",
-          leftNumber: String(leftIndex + 1),
-          leftText: leftLine ?? "",
-          rightNumber: String(rightIndex + 1),
-          rightText: rightLine ?? "",
-        });
-        leftIndex += 1;
-        rightIndex += 1;
-        continue;
-      }
-
-      if (leftLine !== undefined && rightLines[rightIndex + 1] === leftLine) {
-        rows.push({
-          kind: "insert",
-          leftNumber: "",
-          leftText: "",
-          rightNumber: String(rightIndex + 1),
-          rightText: rightLine ?? "",
-        });
-        rightIndex += 1;
-        continue;
-      }
-
-      if (rightLine !== undefined && leftLines[leftIndex + 1] === rightLine) {
-        rows.push({
-          kind: "delete",
-          leftNumber: String(leftIndex + 1),
-          leftText: leftLine ?? "",
-          rightNumber: "",
-          rightText: "",
-        });
-        leftIndex += 1;
-        continue;
-      }
-
-      if (leftLine !== undefined && rightLine !== undefined) {
-        rows.push({
-          kind: "change",
-          leftNumber: String(leftIndex + 1),
-          leftText: leftLine,
-          rightNumber: String(rightIndex + 1),
-          rightText: rightLine,
-        });
-        leftIndex += 1;
-        rightIndex += 1;
-        continue;
-      }
-
-      if (leftLine !== undefined) {
-        rows.push({
-          kind: "delete",
-          leftNumber: String(leftIndex + 1),
-          leftText: leftLine,
-          rightNumber: "",
-          rightText: "",
-        });
-        leftIndex += 1;
-        continue;
-      }
-
-      if (rightLine !== undefined) {
-        rows.push({
-          kind: "insert",
-          leftNumber: "",
-          leftText: "",
-          rightNumber: String(rightIndex + 1),
-          rightText: rightLine,
-        });
-        rightIndex += 1;
-      }
-    }
-
-    return rows;
   }
 
   private arrayBufferToBase64(buffer: ArrayBuffer): string {

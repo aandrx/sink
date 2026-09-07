@@ -82,11 +82,17 @@
 }
 
 /* --- Conflict / Diff Modal --- */
+.sink-conflict-modal {
+  width: min(96vw, 1600px);
+  max-width: min(96vw, 1600px);
+}
+
 .sink-conflict-modal .sink-diff-split {
   display: flex;
   gap: 10px;
   max-height: 55vh;
   overflow: auto;
+  width: 100%;
 }
 
 .sink-conflict-modal .sink-diff-pane {
@@ -96,6 +102,7 @@
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
   background: var(--background-secondary);
+  overflow: hidden;
 }
 
 .sink-conflict-modal .sink-diff-pane h4 {
@@ -122,6 +129,8 @@
 
 .sink-conflict-modal .sink-diff-line-text {
   min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .sink-conflict-modal .sink-diff-equal {

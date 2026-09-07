@@ -1,5 +1,5 @@
-import type { SyncStatus } from "../settings";
 import { setTooltip } from "obsidian";
+import type { DeviceRole, SyncStatus } from "../settings";
 
 export class StatusBar {
   private el: HTMLElement;
@@ -44,14 +44,18 @@ export class StatusBar {
 export class RibbonIcon {
   private el: HTMLElement;
   private status: SyncStatus = "disconnected";
+  private role: DeviceRole = "primary";
+  private headState: "head" | "behind" = "head";
 
   constructor(ribbonEl: HTMLElement) {
     this.el = ribbonEl;
     this.update("disconnected");
   }
 
-  update(status: SyncStatus): void {
+  update(status: SyncStatus, role: DeviceRole = this.role, headState: "head" | "behind" = this.headState): void {
     this.status = status;
+    this.role = role;
+    this.headState = headState;
     this.el.removeClass(
       "sink-ribbon-connected",
       "sink-ribbon-syncing",
@@ -62,19 +66,28 @@ export class RibbonIcon {
     switch (status) {
       case "connected":
         this.el.addClass("sink-ribbon-connected");
-        this.el.setAttribute("aria-label", "Sink — connected");
+        this.setLabel(`Sink: Connected - ${this.formatRole(role)}${headState === "behind" ? " - Behind remote" : " - At HEAD"}`);
         break;
       case "syncing":
         this.el.addClass("sink-ribbon-syncing");
-        this.el.setAttribute("aria-label", "Sink — syncing");
+        this.setLabel(`Sink: Syncing - ${this.formatRole(role)}`);
         break;
       case "error":
         this.el.addClass("sink-ribbon-error");
-        this.el.setAttribute("aria-label", "Sink — error (click to retry)");
+        this.setLabel(`Sink: Error - ${this.formatRole(role)}`);
         break;
       default:
         this.el.addClass("sink-ribbon-disconnected");
-        this.el.setAttribute("aria-label", "Sink — disconnected");
+        this.setLabel(`Sink: Disconnected - ${this.formatRole(role)}`);
     }
+  }
+
+  private formatRole(role: DeviceRole): string {
+    return role === "primary" ? "Primary" : "Secondary";
+  }
+
+  private setLabel(label: string): void {
+    this.el.setAttribute("aria-label", label);
+    setTooltip(this.el, label, { placement: "top" });
   }
 }

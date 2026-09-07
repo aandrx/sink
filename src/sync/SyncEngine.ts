@@ -62,6 +62,7 @@ export class SyncEngine {
   private approvalPromise: Promise<boolean> | null = null;
   private reviewPromise: Promise<ReviewResult> | null = null;
   private sessionMergeAllowed = false;
+  private remoteHeadState: "head" | "behind" = "head";
 
   constructor(app: App, vault: Vault, settings: SinkSettings, vaultName: string, handler: SyncEventHandler) {
     this.app = app;
@@ -109,7 +110,28 @@ export class SyncEngine {
 
   /** Recover or create a stable device identity before syncing starts */
   async initializeDeviceIdentity(): Promise<boolean> {
-    if (this.settings.deviceId) return false;
+    const saved = this.readSavedIdentity();
+    let changed = false;
+
+    if (saved?.deviceId && saved.deviceId !== this.settings.deviceId) {
+      this.settings.deviceId = saved.deviceId;
+      changed = true;
+    }
+
+    if (!this.settings.deviceName && saved?.deviceName) {
+      this.settings.deviceName = saved.deviceName;
+      changed = true;
+    }
+
+    if (this.settings.deviceId && this.settings.deviceName) {
+      this.saveIdentity(this.settings.deviceId, this.settings.deviceName);
+      return changed;
+    }
+
+    if (!this.settings.deviceName) {
+      this.settings.deviceName = `device-${Date.now().toString(36)}`;
+      changed = true;
+    }
 
     const docs = await this.localDB.getAllDeviceDocs();
     const matches = docs.filter((doc) => doc.deviceName === this.settings.deviceName && doc.vaultName === this.vaultName);
@@ -122,6 +144,7 @@ export class SyncEngine {
       this.settings.deviceId = crypto.randomUUID();
     }
 
+    this.saveIdentity(this.settings.deviceId, this.settings.deviceName);
     return true;
   }
 
@@ -147,6 +170,7 @@ export class SyncEngine {
     this.stopHeartbeat();
     this.secondaryPushApproved = false;
     this.sessionMergeAllowed = false;
+    this.remoteHeadState = "head";
 
     // Stop replication
     if (this.replicator) {
@@ -271,7 +295,12 @@ export class SyncEngine {
   private async handleIncomingChanges(docs: SinkDoc[]): Promise<void> {
     const prepared = await this.prepareIncomingChanges(docs);
     if (prepared.length === 0) return;
-    await this.applyIncomingChangesWithReview(prepared, "Review incoming changes");
+    this.remoteHeadState = "behind";
+    try {
+      await this.applyIncomingChangesWithReview(prepared, "Review incoming changes");
+    } finally {
+      this.remoteHeadState = "head";
+    }
   }
 
   /** Encrypt a document's content before storage */
@@ -493,7 +522,7 @@ export class SyncEngine {
     }
   }
 
-  private async getCurrentDeviceRole(): Promise<DeviceRole> {
+  async getCurrentDeviceRole(): Promise<DeviceRole> {
     const doc = await this.localDB.getDeviceDoc(this.settings.deviceId);
     return doc?.role ?? "primary";
   }
@@ -545,7 +574,7 @@ export class SyncEngine {
         });
 
         const actions = contentEl.createDiv({ cls: "sink-device-row-actions" });
-        const approveButton = actions.createEl("button", { text: "Allow once", cls: "mod-cta" });
+        const approveButton = actions.createEl("button", { text: "Allow for this session", cls: "mod-cta" });
         const cancelButton = actions.createEl("button", { text: "Cancel" });
 
         approveButton.addEventListener("click", () => {
@@ -933,5 +962,32 @@ export class SyncEngine {
     };
 
     await this.localDB.put(doc);
+    this.saveIdentity(this.settings.deviceId, this.settings.deviceName);
+  }
+
+  getSyncHeadState(): "head" | "behind" {
+    return this.remoteHeadState;
+  }
+
+  private identityStorageKey(): string {
+    return `sink:${this.vaultName}:identity`;
+  }
+
+  private readSavedIdentity(): { deviceId?: string; deviceName?: string } | null {
+    try {
+      const raw = window.localStorage.getItem(this.identityStorageKey());
+      if (!raw) return null;
+      return JSON.parse(raw) as { deviceId?: string; deviceName?: string };
+    } catch {
+      return null;
+    }
+  }
+
+  private saveIdentity(deviceId: string, deviceName: string): void {
+    try {
+      window.localStorage.setItem(this.identityStorageKey(), JSON.stringify({ deviceId, deviceName }));
+    } catch {
+      // Ignore storage failures; settings persistence still keeps the current identity.
+    }
   }
 }

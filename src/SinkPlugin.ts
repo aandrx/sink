@@ -113,12 +113,6 @@ export default class SinkPlugin extends Plugin {
     if (!this.settings.deviceName) {
       this.settings.deviceName = `device-${Date.now().toString(36)}`;
     }
-    if (!this.settings.deviceId) {
-      this.settings.deviceId = crypto.randomUUID();
-    }
-    if (!this.settings.deviceName || !this.settings.deviceId) {
-      await this.saveSettings();
-    }
 
     this.syncEngine = new SyncEngine(
       this.app,
@@ -135,6 +129,7 @@ export default class SinkPlugin extends Plugin {
       }
 
       await this.syncEngine.start();
+      await this.refreshRibbonState();
       this.statusBar?.setStatus("connected");
 
       // Register vault events
@@ -185,7 +180,7 @@ export default class SinkPlugin extends Plugin {
     switch (event.type) {
       case "status-change":
         this.statusBar?.setStatus(event.status as SyncStatus);
-        this.ribbonIcon?.update(event.status as SyncStatus);
+        void this.refreshRibbonState(event.status as SyncStatus);
         this.floatingStatus?.setStatus(event.status as SyncStatus);
         break;
       case "doc-pushed":
@@ -208,6 +203,19 @@ export default class SinkPlugin extends Plugin {
         }
         break;
     }
+  }
+
+  async refreshRibbonState(status?: SyncStatus): Promise<void> {
+    if (!this.ribbonIcon) return;
+
+    const engine = this.syncEngine;
+    if (!engine) {
+      this.ribbonIcon.update(status ?? "disconnected");
+      return;
+    }
+
+    const [role, headState] = await Promise.all([engine.getCurrentDeviceRole(), Promise.resolve(engine.getSyncHeadState())]);
+    this.ribbonIcon.update(status ?? engine.getStatus(), role, headState);
   }
 
   /** Get the sync engine (for UI components) */

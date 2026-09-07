@@ -1,4 +1,5 @@
 import { App, Modal, Setting } from "obsidian";
+import { renderSplitDiff } from "./DiffView";
 
 export class ConflictModal extends Modal {
   private path: string;
@@ -25,17 +26,8 @@ export class ConflictModal extends Modal {
       cls: "setting-item-description",
     });
 
-    // Diff display
-    if (this.mine && this.theirs) {
-      const diffContainer = contentEl.createDiv({ cls: "sink-diff-container" });
-
-      const mineDiv = diffContainer.createDiv({ cls: "sink-diff-side" });
-      mineDiv.createEl("h4", { text: "This device" });
-      mineDiv.createEl("pre", { text: this.truncate(this.mine, 2000) });
-
-      const theirsDiv = diffContainer.createDiv({ cls: "sink-diff-side" });
-      theirsDiv.createEl("h4", { text: "Other device" });
-      theirsDiv.createEl("pre", { text: this.truncate(this.theirs, 2000) });
+    if (this.mine || this.theirs) {
+      renderSplitDiff(contentEl, "This device", "Other device", this.mine, this.theirs);
     }
 
     // Actions
@@ -58,8 +50,4 @@ export class ConflictModal extends Modal {
     this.contentEl.empty();
   }
 
-  private truncate(text: string, maxLen: number): string {
-    if (text.length <= maxLen) return text;
-    return text.slice(0, maxLen) + "\n... (truncated)";
-  }
 }
