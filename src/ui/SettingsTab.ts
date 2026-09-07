@@ -1,6 +1,6 @@
-import { App, PluginSettingTab, Setting, Notice } from "obsidian";
+import { App, Modal, PluginSettingTab, Setting, Notice, TFile } from "obsidian";
 import type SinkPlugin from "../SinkPlugin";
-import type { DeviceRole, KnownDevice, SnapshotSummary } from "../settings";
+import type { DeviceRole, KnownDevice, SnapshotFileEntry, SnapshotMetaDoc, SnapshotSummary } from "../settings";
 import type { SyncEngine } from "../sync/SyncEngine";
 import { generateSetupURI } from "../utils/uri";
 import { SetupWizard } from "./SetupWizard";
@@ -154,6 +154,31 @@ export class SinkSettingsTab extends PluginSettingTab {
           })
       );
 
+    const engine = this.plugin.getSyncEngine();
+    if (engine) {
+      new Setting(containerEl)
+        .setName("Session merge allowance")
+        .setDesc("Allow merges without extra prompts until Obsidian closes or Sink stops.")
+        .addButton((btn) =>
+          btn
+            .setButtonText(engine.isSessionMergeAllowed ? "Disable for session" : "Allow merges for this session")
+            .setCta()
+            .onClick(async () => {
+              const currentEngine = this.plugin.getSyncEngine();
+              if (!currentEngine) return;
+
+              if (currentEngine.isSessionMergeAllowed) {
+                currentEngine.clearSessionMergeAllowance();
+                new Notice("Session merge prompts re-enabled");
+              } else {
+                currentEngine.allowMergesForSession();
+                new Notice("Session merge prompts disabled for this Obsidian session");
+              }
+              this.display();
+            })
+        );
+    }
+
     // --- Device Section ---
     containerEl.createEl("h2", { text: "Device" });
 
@@ -211,7 +236,7 @@ export class SinkSettingsTab extends PluginSettingTab {
 
     containerEl.createEl("h2", { text: "Backups" });
     const backupInfo = containerEl.createEl("p", {
-      text: "Risky sync batches now create restore points. Use these to roll back local files.",
+      text: "Select a snapshot to review its changed files, then click a file to inspect the diff.",
       cls: "setting-item-description",
     });
     const backupContainer = containerEl.createDiv();
@@ -359,9 +384,12 @@ export class SinkSettingsTab extends PluginSettingTab {
 
     const selectorRow = container.createDiv({ cls: "sink-snapshot-selector-row" });
     const select = selectorRow.createEl("select", { cls: "sink-snapshot-select" });
-    const restoreBtn = selectorRow.createEl("button", { text: "Restore selected", cls: "mod-cta" });
+    const refreshBtn = selectorRow.createEl("button", { text: "Refresh", cls: "mod-cta" });
+    const restoreBtn = selectorRow.createEl("button", { text: "Restore snapshot" });
 
-    let selectedSnapshot = snapshots[0];
+    const snapshotDetails = container.createDiv({ cls: "sink-snapshot-details" });
+    const selectedSnapshot = snapshots[0];
+
     for (const snapshot of snapshots) {
       const option = select.createEl("option", {
         text: `${this.formatTimestamp(snapshot.createdAt)} • ${snapshot.reason}`,
@@ -369,39 +397,252 @@ export class SinkSettingsTab extends PluginSettingTab {
       option.value = snapshot.id;
     }
     select.value = selectedSnapshot.id;
+
+    const renderSelected = async (snapshotId: string) => {
+      snapshotDetails.empty();
+      const snapshot = await engine.getSnapshotDetails(snapshotId);
+      if (!snapshot) {
+        snapshotDetails.createEl("p", { text: "Snapshot not found." });
+        return;
+      }
+
+      snapshotDetails.createEl("h3", { text: `${this.formatTimestamp(snapshot.createdAt)} • ${snapshot.reason}` });
+      snapshotDetails.createEl("p", {
+        text: `Source: ${snapshot.sourceDevice} • ${snapshot.files.length} files`,
+        cls: "setting-item-description",
+      });
+
+      const fileList = snapshotDetails.createDiv({ cls: "sink-snapshot-file-list" });
+      const ordered = await this.orderSnapshotFilesByChange(snapshot);
+      for (const fileEntry of ordered) {
+        this.renderSnapshotFileRow(fileList, snapshot, fileEntry);
+      }
+    };
+
     select.addEventListener("change", () => {
-      const found = snapshots.find((snapshot) => snapshot.id === select.value);
-      if (found) selectedSnapshot = found;
+      void renderSelected(select.value);
+    });
+
+    refreshBtn.addEventListener("click", async () => {
+      await this.renderSnapshots(container, infoEl);
     });
 
     restoreBtn.addEventListener("click", async () => {
+      const snapshot = snapshots.find((entry) => entry.id === select.value) ?? snapshots[0];
       const ok = window.confirm(
-        `Restore snapshot from ${this.formatTimestamp(selectedSnapshot.createdAt)} affecting ${selectedSnapshot.fileCount} files?`
+        `Restore snapshot from ${this.formatTimestamp(snapshot.createdAt)} affecting ${snapshot.fileCount} files?`
       );
       if (!ok) return;
 
-      const restored = await engine.restoreSnapshot(selectedSnapshot.id);
+      const restored = await engine.restoreSnapshot(snapshot.id);
       new Notice(`Sink: Restored ${restored} files from snapshot`);
     });
 
-    snapshots.forEach((snapshot) => this.renderSnapshotRow(container, engine, snapshot));
+    void renderSelected(selectedSnapshot.id);
   }
 
-  private renderSnapshotRow(container: HTMLElement, engine: SyncEngine, snapshot: SnapshotSummary): void {
-    new Setting(container)
-      .setName(`${this.formatTimestamp(snapshot.createdAt)} (${snapshot.fileCount} files)`)
-      .setDesc(snapshot.reason)
-      .addButton((btn) =>
-        btn.setButtonText("Restore").setWarning().onClick(async () => {
-          const ok = window.confirm(
-            `Restore snapshot from ${this.formatTimestamp(snapshot.createdAt)} affecting ${snapshot.fileCount} files?`
-          );
-          if (!ok) return;
+  private async orderSnapshotFilesByChange(snapshot: SnapshotMetaDoc): Promise<SnapshotFileEntry[]> {
+    const files = [...snapshot.files];
+    const scored = await Promise.all(
+      files.map(async (entry) => ({
+        entry,
+        changed: await this.hasSnapshotFileChanged(entry),
+      }))
+    );
 
-          const restored = await engine.restoreSnapshot(snapshot.id);
-          new Notice(`Sink: Restored ${restored} files from snapshot`);
-        })
-      );
+    return scored
+      .sort((left, right) => Number(right.changed) - Number(left.changed) || left.entry.path.localeCompare(right.entry.path))
+      .map((item) => item.entry);
+  }
+
+  private async hasSnapshotFileChanged(entry: SnapshotFileEntry): Promise<boolean> {
+    const current = this.app.vault.getAbstractFileByPath(entry.path);
+    if (!entry.existed) return !!current;
+    if (!current) return true;
+
+    if (entry.isBinary) {
+      if (!(current instanceof TFile)) return true;
+      const buffer = await this.app.vault.readBinary(current);
+      return this.arrayBufferToBase64(buffer) !== entry.content;
+    }
+
+    if (!(current instanceof TFile)) return true;
+    const text = await this.app.vault.read(current);
+    return text !== entry.content;
+  }
+
+  private renderSnapshotFileRow(container: HTMLElement, snapshot: SnapshotMetaDoc, entry: SnapshotFileEntry): void {
+    const row = container.createDiv({ cls: "sink-snapshot-file-row" });
+    const title = row.createDiv({ cls: "sink-snapshot-file-title" });
+    title.createEl("span", { text: entry.path });
+    if (!entry.existed) {
+      title.createEl("span", { text: "deleted", cls: "sink-snapshot-file-badge" });
+    }
+
+    const actions = row.createDiv({ cls: "sink-device-row-actions" });
+    const viewDiffButton = actions.createEl("button", { text: "View diff", cls: "mod-cta" });
+    viewDiffButton.addEventListener("click", () => {
+      void this.showSnapshotDiff(snapshot, entry);
+    });
+  }
+
+  private async showSnapshotDiff(snapshot: SnapshotMetaDoc, entry: SnapshotFileEntry): Promise<void> {
+    const current = this.app.vault.getAbstractFileByPath(entry.path);
+    const currentText = await this.getCurrentFileText(entry);
+    const snapshotText = entry.content;
+
+    const modal = new Modal(this.app);
+    modal.onOpen = () => {
+      const { contentEl } = modal;
+      contentEl.empty();
+      contentEl.addClass("sink-conflict-modal");
+      contentEl.createEl("h3", { text: entry.path });
+      contentEl.createEl("p", { text: `Snapshot: ${this.formatTimestamp(snapshot.createdAt)} • ${snapshot.reason}` });
+
+      if (entry.isBinary) {
+        contentEl.createEl("p", { text: "Binary diff preview is not available for this file." });
+        return;
+      }
+
+      const wrapper = contentEl.createDiv({ cls: "sink-diff-split" });
+      const leftPane = wrapper.createDiv({ cls: "sink-diff-pane sink-diff-left" });
+      const rightPane = wrapper.createDiv({ cls: "sink-diff-pane sink-diff-right" });
+      leftPane.createEl("h4", { text: "Current" });
+      rightPane.createEl("h4", { text: "Snapshot" });
+
+      const rows = this.buildSplitDiff(currentText, snapshotText);
+      for (const row of rows) {
+        const leftRow = leftPane.createDiv({ cls: `sink-diff-row sink-diff-${row.kind}` });
+        leftRow.createDiv({ cls: "sink-diff-line-number", text: row.leftNumber ?? "" });
+        leftRow.createDiv({ cls: "sink-diff-line-text", text: row.leftText ?? "" });
+
+        const rightRow = rightPane.createDiv({ cls: `sink-diff-row sink-diff-${row.kind}` });
+        rightRow.createDiv({ cls: "sink-diff-line-number", text: row.rightNumber ?? "" });
+        rightRow.createDiv({ cls: "sink-diff-line-text", text: row.rightText ?? "" });
+      }
+    };
+
+    modal.open();
+  }
+
+  private async getCurrentFileText(entry: SnapshotFileEntry): Promise<string> {
+    const current = this.app.vault.getAbstractFileByPath(entry.path);
+    if (!current || !(current instanceof TFile)) return "";
+    if (entry.isBinary) {
+      const buffer = await this.app.vault.readBinary(current);
+      return this.arrayBufferToBase64(buffer);
+    }
+    return await this.app.vault.read(current);
+  }
+
+  private buildSplitDiff(leftText: string, rightText: string): Array<{
+    kind: "equal" | "delete" | "insert" | "change";
+    leftNumber?: string;
+    leftText?: string;
+    rightNumber?: string;
+    rightText?: string;
+  }> {
+    const leftLines = leftText.split(/\r?\n/);
+    const rightLines = rightText.split(/\r?\n/);
+    const rows: Array<{
+      kind: "equal" | "delete" | "insert" | "change";
+      leftNumber?: string;
+      leftText?: string;
+      rightNumber?: string;
+      rightText?: string;
+    }> = [];
+
+    let leftIndex = 0;
+    let rightIndex = 0;
+
+    while (leftIndex < leftLines.length || rightIndex < rightLines.length) {
+      const leftLine = leftLines[leftIndex];
+      const rightLine = rightLines[rightIndex];
+
+      if (leftLine === rightLine) {
+        rows.push({
+          kind: "equal",
+          leftNumber: String(leftIndex + 1),
+          leftText: leftLine ?? "",
+          rightNumber: String(rightIndex + 1),
+          rightText: rightLine ?? "",
+        });
+        leftIndex += 1;
+        rightIndex += 1;
+        continue;
+      }
+
+      if (leftLine !== undefined && rightLines[rightIndex + 1] === leftLine) {
+        rows.push({
+          kind: "insert",
+          leftNumber: "",
+          leftText: "",
+          rightNumber: String(rightIndex + 1),
+          rightText: rightLine ?? "",
+        });
+        rightIndex += 1;
+        continue;
+      }
+
+      if (rightLine !== undefined && leftLines[leftIndex + 1] === rightLine) {
+        rows.push({
+          kind: "delete",
+          leftNumber: String(leftIndex + 1),
+          leftText: leftLine ?? "",
+          rightNumber: "",
+          rightText: "",
+        });
+        leftIndex += 1;
+        continue;
+      }
+
+      if (leftLine !== undefined && rightLine !== undefined) {
+        rows.push({
+          kind: "change",
+          leftNumber: String(leftIndex + 1),
+          leftText: leftLine,
+          rightNumber: String(rightIndex + 1),
+          rightText: rightLine,
+        });
+        leftIndex += 1;
+        rightIndex += 1;
+        continue;
+      }
+
+      if (leftLine !== undefined) {
+        rows.push({
+          kind: "delete",
+          leftNumber: String(leftIndex + 1),
+          leftText: leftLine,
+          rightNumber: "",
+          rightText: "",
+        });
+        leftIndex += 1;
+        continue;
+      }
+
+      if (rightLine !== undefined) {
+        rows.push({
+          kind: "insert",
+          leftNumber: "",
+          leftText: "",
+          rightNumber: String(rightIndex + 1),
+          rightText: rightLine,
+        });
+        rightIndex += 1;
+      }
+    }
+
+    return rows;
+  }
+
+  private arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let index = 0; index < bytes.length; index++) {
+      binary += String.fromCharCode(bytes[index]);
+    }
+    return btoa(binary);
   }
 
   private formatTimestamp(value?: number): string {

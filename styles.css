@@ -163,6 +163,55 @@
   min-width: 280px;
 }
 
+.sink-snapshot-details {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+
+.sink-snapshot-details h3 {
+  margin: 0 0 6px 0;
+}
+
+.sink-snapshot-file-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.sink-snapshot-file-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+}
+
+.sink-snapshot-file-title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.sink-snapshot-file-title span:first-child {
+  font-family: var(--font-monospace);
+  word-break: break-word;
+}
+
+.sink-snapshot-file-badge {
+  font-size: var(--font-smaller);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 /* --- Setup Wizard --- */
 .sink-setup-wizard .sink-uri-display {
   font-family: var(--font-monospace);

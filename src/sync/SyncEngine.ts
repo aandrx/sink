@@ -1,4 +1,4 @@
-import { App, Notice, TAbstractFile, TFile, Vault } from "obsidian";
+import { App, Modal, Notice, TAbstractFile, TFile, Vault } from "obsidian";
 import type {
   ChangeDecision,
   DeviceMetaDoc,
@@ -61,6 +61,7 @@ export class SyncEngine {
   private secondaryPushApproved = false;
   private approvalPromise: Promise<boolean> | null = null;
   private reviewPromise: Promise<ReviewResult> | null = null;
+  private sessionMergeAllowed = false;
 
   constructor(app: App, vault: Vault, settings: SinkSettings, vaultName: string, handler: SyncEventHandler) {
     this.app = app;
@@ -124,6 +125,18 @@ export class SyncEngine {
     return true;
   }
 
+  allowMergesForSession(): void {
+    this.sessionMergeAllowed = true;
+  }
+
+  clearSessionMergeAllowance(): void {
+    this.sessionMergeAllowed = false;
+  }
+
+  get isSessionMergeAllowed(): boolean {
+    return this.sessionMergeAllowed;
+  }
+
   /** Stop syncing and clean up */
   async stop(): Promise<void> {
     // Cancel all debounce timers
@@ -133,6 +146,7 @@ export class SyncEngine {
     this.debounceTimers.clear();
     this.stopHeartbeat();
     this.secondaryPushApproved = false;
+    this.sessionMergeAllowed = false;
 
     // Stop replication
     if (this.replicator) {
@@ -368,6 +382,22 @@ export class SyncEngine {
     return restored;
   }
 
+  async getSnapshotDetails(snapshotId: string): Promise<SnapshotMetaDoc | null> {
+    const snapshot = await this.localDB.getSnapshotDoc(snapshotId);
+    if (!snapshot) return null;
+
+    return {
+      _id: snapshot._id,
+      _rev: snapshot._rev,
+      type: snapshot.type,
+      metaType: snapshot.metaType,
+      createdAt: snapshot.createdAt,
+      reason: snapshot.reason,
+      sourceDevice: snapshot.sourceDevice,
+      files: snapshot.files,
+    };
+  }
+
   async removeDevice(deviceId: string): Promise<void> {
     if (deviceId === this.settings.deviceId) {
       throw new Error("Cannot remove the current device");
@@ -469,6 +499,10 @@ export class SyncEngine {
   }
 
   private async ensurePushAllowed(action: string): Promise<boolean> {
+    if (this.sessionMergeAllowed) {
+      return true;
+    }
+
     const role = await this.getCurrentDeviceRole();
     if (role === "primary") {
       this.secondaryPushApproved = true;
@@ -480,9 +514,7 @@ export class SyncEngine {
     }
 
     if (!this.approvalPromise) {
-      this.approvalPromise = Promise.resolve(
-        window.confirm(`Sink: ${this.settings.deviceName || "This device"} is marked secondary. Confirm before it can ${action}.`)
-      )
+      this.approvalPromise = this.showApprovalModal(action)
         .then((approved) => {
           this.secondaryPushApproved = approved;
           if (!approved) {
@@ -499,6 +531,41 @@ export class SyncEngine {
     }
 
     return this.approvalPromise;
+  }
+
+  private async showApprovalModal(action: string): Promise<boolean> {
+    return await new Promise<boolean>((resolve) => {
+      const modal = new Modal(this.app);
+      modal.onOpen = () => {
+        const { contentEl } = modal;
+        contentEl.empty();
+        contentEl.createEl("h2", { text: "Confirm merge" });
+        contentEl.createEl("p", {
+          text: `${this.settings.deviceName || "This device"} is marked secondary. Confirm before it can ${action}.`,
+        });
+
+        const actions = contentEl.createDiv({ cls: "sink-device-row-actions" });
+        const approveButton = actions.createEl("button", { text: "Allow once", cls: "mod-cta" });
+        const cancelButton = actions.createEl("button", { text: "Cancel" });
+
+        approveButton.addEventListener("click", () => {
+          resolve(true);
+          modal.close();
+        });
+
+        cancelButton.addEventListener("click", () => {
+          resolve(false);
+          modal.close();
+        });
+      };
+
+      modal.onClose = () => {
+        modal.contentEl.empty();
+        resolve(false);
+      };
+
+      modal.open();
+    });
   }
 
   private async prepareIncomingChanges(docs: SinkDoc[]): Promise<PreparedChange[]> {
@@ -615,6 +682,7 @@ export class SyncEngine {
   }
 
   private async shouldReviewBatch(changes: PreparedChange[]): Promise<boolean> {
+    if (this.sessionMergeAllowed) return false;
     if (changes.some((change) => change.remoteDeleted)) return true;
 
     const activeDevices = await this.getKnownDevices();
