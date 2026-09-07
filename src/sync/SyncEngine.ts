@@ -104,7 +104,11 @@ export class SyncEngine {
 
     // Start continuous replication
     this.replicator.start();
-    await this.upsertDeviceRecord();
+    try {
+      await this.upsertDeviceRecord();
+    } catch (error: any) {
+      this.handler({ type: "error", message: `Device registry update skipped at startup: ${error.message}` });
+    }
     this.startHeartbeat();
   }
 
@@ -236,6 +240,7 @@ export class SyncEngine {
 
       let doc = await this.serializer.fileToDoc(file);
       doc.deviceName = this.settings.deviceName;
+      doc.deviceId = this.settings.deviceId;
 
       // Encrypt if needed
       if (this.crypto) {
@@ -259,6 +264,7 @@ export class SyncEngine {
           const doc = await this.serializer.fileToDoc(file);
           doc._rev = latest._rev;
           doc.deviceName = this.settings.deviceName;
+          doc.deviceId = this.settings.deviceId;
           if (this.crypto) {
             await this.localDB.put(await this.encryptDoc(doc));
           } else {
@@ -282,6 +288,7 @@ export class SyncEngine {
         const doc = this.serializer.createDeletionDoc(path);
         doc._rev = existing._rev;
         doc.deviceName = this.settings.deviceName;
+        doc.deviceId = this.settings.deviceId;
         await this.localDB.put(doc);
         await this.upsertDeviceRecord({ lastPushAt: Date.now() });
         this.handler({ type: "doc-pushed", path });
@@ -603,7 +610,8 @@ export class SyncEngine {
     for (const doc of docs) {
       if (!doc.type || doc.type !== "file") continue;
       if (!doc.path) continue;
-      if (doc.deviceName === this.settings.deviceName) continue;
+      if (doc.deviceId && doc.deviceId === this.settings.deviceId) continue;
+      if (!doc.deviceId && doc.deviceName === this.settings.deviceName) continue;
 
       let remoteDoc = doc;
       if (this.crypto && doc.iv) {
@@ -616,6 +624,7 @@ export class SyncEngine {
       prepared.push({
         path: remoteDoc.path,
         sourceDevice: remoteDoc.deviceName ?? "unknown",
+        sourceDeviceId: remoteDoc.deviceId,
         remoteMtime: remoteDoc.mtime,
         localMtime: local.mtime,
         remoteDeleted: !!remoteDoc.deleted,
@@ -961,7 +970,21 @@ export class SyncEngine {
       lastPullAt: overrides.lastPullAt ?? existing?.lastPullAt,
     };
 
-    await this.localDB.put(doc);
+    try {
+      await this.localDB.put(doc);
+    } catch (error: any) {
+      if (error?.status === 409) {
+        const retryExisting = await this.localDB.getDeviceDoc(this.settings.deviceId);
+        if (retryExisting) {
+          doc._rev = retryExisting._rev;
+          await this.localDB.put(doc);
+          this.saveIdentity(this.settings.deviceId, this.settings.deviceName);
+          return;
+        }
+      }
+
+      throw error;
+    }
     this.saveIdentity(this.settings.deviceId, this.settings.deviceName);
   }
 

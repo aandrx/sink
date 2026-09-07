@@ -57,6 +57,8 @@ export interface SinkDoc {
   chunks?: string[];
   /** Device that last modified this doc */
   deviceName?: string;
+  /** Stable device UUID that last modified this doc */
+  deviceId?: string;
   /** Document type marker */
   type: "file" | "chunk" | "meta";
 }
