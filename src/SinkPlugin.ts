@@ -129,6 +129,11 @@ export default class SinkPlugin extends Plugin {
     );
 
     try {
+      const identityChanged = await this.syncEngine.initializeDeviceIdentity();
+      if (identityChanged) {
+        await this.saveSettings();
+      }
+
       await this.syncEngine.start();
       this.statusBar?.setStatus("connected");
 

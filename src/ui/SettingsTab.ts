@@ -324,6 +324,20 @@ export class SinkSettingsTab extends PluginSettingTab {
             new Notice(`${device.deviceName} marked secondary`);
             this.display();
           })
+      )
+      .addButton((btn) =>
+        btn
+          .setButtonText("Remove")
+          .setDisabled(device.isCurrentDevice)
+          .setWarning()
+          .onClick(async () => {
+            const ok = window.confirm(`Remove ${device.deviceName} from the known devices list?`);
+            if (!ok) return;
+
+            await engine.removeDevice(device.deviceId);
+            new Notice(`${device.deviceName} removed`);
+            this.display();
+          })
       );
   }
 
@@ -342,6 +356,34 @@ export class SinkSettingsTab extends PluginSettingTab {
     }
 
     infoEl.setText("Restore points are local safety snapshots taken before risky batches are applied.");
+
+    const selectorRow = container.createDiv({ cls: "sink-snapshot-selector-row" });
+    const select = selectorRow.createEl("select", { cls: "sink-snapshot-select" });
+    const restoreBtn = selectorRow.createEl("button", { text: "Restore selected", cls: "mod-cta" });
+
+    let selectedSnapshot = snapshots[0];
+    for (const snapshot of snapshots) {
+      const option = select.createEl("option", {
+        text: `${this.formatTimestamp(snapshot.createdAt)} • ${snapshot.reason}`,
+      });
+      option.value = snapshot.id;
+    }
+    select.value = selectedSnapshot.id;
+    select.addEventListener("change", () => {
+      const found = snapshots.find((snapshot) => snapshot.id === select.value);
+      if (found) selectedSnapshot = found;
+    });
+
+    restoreBtn.addEventListener("click", async () => {
+      const ok = window.confirm(
+        `Restore snapshot from ${this.formatTimestamp(selectedSnapshot.createdAt)} affecting ${selectedSnapshot.fileCount} files?`
+      );
+      if (!ok) return;
+
+      const restored = await engine.restoreSnapshot(selectedSnapshot.id);
+      new Notice(`Sink: Restored ${restored} files from snapshot`);
+    });
+
     snapshots.forEach((snapshot) => this.renderSnapshotRow(container, engine, snapshot));
   }
 

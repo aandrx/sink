@@ -106,6 +106,24 @@ export class SyncEngine {
     this.startHeartbeat();
   }
 
+  /** Recover or create a stable device identity before syncing starts */
+  async initializeDeviceIdentity(): Promise<boolean> {
+    if (this.settings.deviceId) return false;
+
+    const docs = await this.localDB.getAllDeviceDocs();
+    const matches = docs.filter((doc) => doc.deviceName === this.settings.deviceName && doc.vaultName === this.vaultName);
+    const existing = matches.sort((left, right) => right.lastSeen - left.lastSeen)[0];
+
+    if (existing) {
+      this.settings.deviceId = existing.deviceId;
+      this.settings.deviceName = existing.deviceName || this.settings.deviceName;
+    } else {
+      this.settings.deviceId = crypto.randomUUID();
+    }
+
+    return true;
+  }
+
   /** Stop syncing and clean up */
   async stop(): Promise<void> {
     // Cancel all debounce timers
@@ -350,6 +368,16 @@ export class SyncEngine {
     return restored;
   }
 
+  async removeDevice(deviceId: string): Promise<void> {
+    if (deviceId === this.settings.deviceId) {
+      throw new Error("Cannot remove the current device");
+    }
+
+    const doc = await this.localDB.getDeviceDoc(deviceId);
+    if (!doc) return;
+    await this.localDB.removeStoredDoc(doc);
+  }
+
   async refreshKnownDevices(): Promise<KnownDevice[]> {
     if (this.replicator) {
       await this.replicator.pullOnce();
@@ -550,11 +578,14 @@ export class SyncEngine {
 
     if (selected.length === 0) return 0;
 
-    await this.createSnapshot(
-      `${title} (${selected.length} files)`,
-      selected.map((change) => change.path),
-      selected[0].sourceDevice
-    );
+    const shouldSnapshot = needsReview || selected.length > 1 || selected.some((change) => change.remoteDeleted);
+    if (shouldSnapshot) {
+      await this.createSnapshot(
+        `${title} (${selected.length} files)`,
+        selected.map((change) => change.path),
+        selected[0].sourceDevice
+      );
+    }
 
     let applied = 0;
     for (const change of selected) {
@@ -584,8 +615,16 @@ export class SyncEngine {
   }
 
   private async shouldReviewBatch(changes: PreparedChange[]): Promise<boolean> {
-    if (changes.length >= SyncEngine.RISKY_CHANGE_COUNT) return true;
     if (changes.some((change) => change.remoteDeleted)) return true;
+
+    const activeDevices = await this.getKnownDevices();
+    const activeCount = activeDevices.filter((device) => device.isActive).length;
+
+    if (changes.length <= 2 && activeCount >= 2) {
+      return false;
+    }
+
+    if (changes.length >= SyncEngine.RISKY_CHANGE_COUNT) return true;
 
     const deviceDoc = await this.localDB.getDeviceDoc(this.settings.deviceId);
     const lastPullAt = deviceDoc?.lastPullAt ?? 0;
@@ -600,7 +639,7 @@ export class SyncEngine {
       decisions: changes.map((change) => ({
         path: change.path,
         selected: true,
-        decision: "keep-remote",
+        decision: change.suggested,
       })),
     };
   }

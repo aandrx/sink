@@ -154,6 +154,10 @@ export class BatchReviewModal extends Modal {
 			contentEl.empty();
 			contentEl.createEl("h3", { text: change.path });
 			contentEl.createEl("p", { text: `Source device: ${change.sourceDevice}` });
+			contentEl.createEl("p", {
+				text: "Split diff view. Green lines are additions, red lines are removals or replacements.",
+				cls: "setting-item-description",
+			});
 
 			if (change.isBinary) {
 				contentEl.createEl("p", {
@@ -163,16 +167,126 @@ export class BatchReviewModal extends Modal {
 				return;
 			}
 
-			const wrapper = contentEl.createDiv({ cls: "sink-diff-container" });
-			const localDiv = wrapper.createDiv({ cls: "sink-diff-side" });
-			localDiv.createEl("h4", { text: "Local" });
-			localDiv.createEl("pre", { text: this.truncate(change.localContent ?? "", 4000) });
+			const wrapper = contentEl.createDiv({ cls: "sink-diff-split" });
+			const leftPane = wrapper.createDiv({ cls: "sink-diff-pane sink-diff-left" });
+			const rightPane = wrapper.createDiv({ cls: "sink-diff-pane sink-diff-right" });
 
-			const remoteDiv = wrapper.createDiv({ cls: "sink-diff-side" });
-			remoteDiv.createEl("h4", { text: "Remote" });
-			remoteDiv.createEl("pre", { text: this.truncate(change.remoteContent ?? "", 4000) });
+			leftPane.createEl("h4", { text: "Local" });
+			rightPane.createEl("h4", { text: "Remote" });
+
+			const rows = this.buildSplitDiff(change.localContent ?? "", change.remoteContent ?? "");
+			for (const row of rows) {
+				const leftRow = leftPane.createDiv({ cls: `sink-diff-row sink-diff-${row.kind}` });
+				leftRow.createDiv({ cls: "sink-diff-line-number", text: row.leftNumber ?? "" });
+				leftRow.createDiv({ cls: "sink-diff-line-text", text: row.leftText ?? "" });
+
+				const rightRow = rightPane.createDiv({ cls: `sink-diff-row sink-diff-${row.kind}` });
+				rightRow.createDiv({ cls: "sink-diff-line-number", text: row.rightNumber ?? "" });
+				rightRow.createDiv({ cls: "sink-diff-line-text", text: row.rightText ?? "" });
+			}
 		};
 		popup.open();
+	}
+
+	private buildSplitDiff(leftText: string, rightText: string): Array<{
+		kind: "equal" | "delete" | "insert" | "change";
+		leftNumber?: string;
+		leftText?: string;
+		rightNumber?: string;
+		rightText?: string;
+	}> {
+		const leftLines = leftText.split(/\r?\n/);
+		const rightLines = rightText.split(/\r?\n/);
+		const rows: Array<{
+			kind: "equal" | "delete" | "insert" | "change";
+			leftNumber?: string;
+			leftText?: string;
+			rightNumber?: string;
+			rightText?: string;
+		}> = [];
+
+		let leftIndex = 0;
+		let rightIndex = 0;
+
+		while (leftIndex < leftLines.length || rightIndex < rightLines.length) {
+			const leftLine = leftLines[leftIndex];
+			const rightLine = rightLines[rightIndex];
+
+			if (leftLine === rightLine) {
+				rows.push({
+					kind: "equal",
+					leftNumber: String(leftIndex + 1),
+					leftText: leftLine ?? "",
+					rightNumber: String(rightIndex + 1),
+					rightText: rightLine ?? "",
+				});
+				leftIndex += 1;
+				rightIndex += 1;
+				continue;
+			}
+
+			if (leftLine !== undefined && rightLines[rightIndex + 1] === leftLine) {
+				rows.push({
+					kind: "insert",
+					leftNumber: "",
+					leftText: "",
+					rightNumber: String(rightIndex + 1),
+					rightText: rightLine ?? "",
+				});
+				rightIndex += 1;
+				continue;
+			}
+
+			if (rightLine !== undefined && leftLines[leftIndex + 1] === rightLine) {
+				rows.push({
+					kind: "delete",
+					leftNumber: String(leftIndex + 1),
+					leftText: leftLine ?? "",
+					rightNumber: "",
+					rightText: "",
+				});
+				leftIndex += 1;
+				continue;
+			}
+
+			if (leftLine !== undefined && rightLine !== undefined) {
+				rows.push({
+					kind: "change",
+					leftNumber: String(leftIndex + 1),
+					leftText: leftLine,
+					rightNumber: String(rightIndex + 1),
+					rightText: rightLine,
+				});
+				leftIndex += 1;
+				rightIndex += 1;
+				continue;
+			}
+
+			if (leftLine !== undefined) {
+				rows.push({
+					kind: "delete",
+					leftNumber: String(leftIndex + 1),
+					leftText: leftLine,
+					rightNumber: "",
+					rightText: "",
+				});
+				leftIndex += 1;
+				continue;
+			}
+
+			if (rightLine !== undefined) {
+				rows.push({
+					kind: "insert",
+					leftNumber: "",
+					leftText: "",
+					rightNumber: String(rightIndex + 1),
+					rightText: rightLine,
+				});
+				rightIndex += 1;
+			}
+		}
+
+		return rows;
 	}
 
 	private setAllSelection(selected: boolean): void {

@@ -81,23 +81,86 @@
   to   { transform: rotate(360deg); }
 }
 
-/* --- Conflict Modal --- */
-.sink-conflict-modal .sink-diff-container {
+/* --- Conflict / Diff Modal --- */
+.sink-conflict-modal .sink-diff-split {
   display: flex;
-  gap: 8px;
-  max-height: 400px;
-  overflow-y: auto;
+  gap: 10px;
+  max-height: 55vh;
+  overflow: auto;
 }
 
-.sink-conflict-modal .sink-diff-side {
+.sink-conflict-modal .sink-diff-pane {
   flex: 1;
+  min-width: 0;
   padding: 8px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+}
+
+.sink-conflict-modal .sink-diff-pane h4 {
+  margin: 0 0 8px 0;
+}
+
+.sink-conflict-modal .sink-diff-row {
+  display: grid;
+  grid-template-columns: 3.5em 1fr;
+  gap: 8px;
+  align-items: start;
   font-family: var(--font-monospace);
   font-size: var(--font-smaller);
   white-space: pre-wrap;
-  overflow-x: auto;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.sink-conflict-modal .sink-diff-line-number {
+  text-align: right;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.sink-conflict-modal .sink-diff-line-text {
+  min-width: 0;
+}
+
+.sink-conflict-modal .sink-diff-equal {
+  background: transparent;
+}
+
+.sink-conflict-modal .sink-diff-insert {
+  background: color-mix(in srgb, var(--color-green) 14%, transparent);
+}
+
+.sink-conflict-modal .sink-diff-delete {
+  background: color-mix(in srgb, var(--color-red) 14%, transparent);
+}
+
+.sink-conflict-modal .sink-diff-change {
+  background: color-mix(in srgb, var(--color-yellow) 12%, transparent);
+}
+
+.sink-conflict-modal .sink-diff-left .sink-diff-delete .sink-diff-line-text,
+.sink-conflict-modal .sink-diff-left .sink-diff-change .sink-diff-line-text {
+  color: var(--text-error);
+}
+
+.sink-conflict-modal .sink-diff-right .sink-diff-insert .sink-diff-line-text,
+.sink-conflict-modal .sink-diff-right .sink-diff-change .sink-diff-line-text {
+  color: var(--color-green);
+}
+
+/* --- Device List / Snapshots --- */
+.sink-device-row-actions,
+.sink-snapshot-selector-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.sink-snapshot-select {
+  min-width: 280px;
 }
 
 /* --- Setup Wizard --- */

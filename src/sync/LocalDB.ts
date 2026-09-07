@@ -22,6 +22,10 @@ export class LocalDB {
     return await this.db.put(doc);
   }
 
+  async removeStoredDoc(doc: SinkStoredDoc & PouchDB.Core.IdMeta & PouchDB.Core.RevisionIdMeta): Promise<PouchDB.Core.Response> {
+    return await this.db.remove(doc);
+  }
+
   async remove(doc: SinkDoc & PouchDB.Core.IdMeta & PouchDB.Core.RevisionIdMeta): Promise<PouchDB.Core.Response> {
     return await this.db.remove(doc);
   }
