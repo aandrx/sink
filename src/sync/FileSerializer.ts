@@ -4,6 +4,8 @@ import type { LocalDB } from "./LocalDB";
 
 const CHUNK_SIZE = 64 * 1024; // 64KB threshold
 
+type ChunkDecryptFn = (ciphertext: string, ivB64: string) => Promise<string>;
+
 /** Binary file extensions that need base64 encoding */
 const BINARY_EXTENSIONS = new Set([
   "png", "jpg", "jpeg", "gif", "bmp", "ico", "svg", "webp",
@@ -22,8 +24,14 @@ export class FileSerializer {
     this.localDB = localDB;
   }
 
-  /** Convert a vault file to a SinkDoc for storage in the database */
-  async fileToDoc(file: TFile): Promise<SinkDoc> {
+  /**
+   * Convert a vault file to a SinkDoc for storage in the database.
+   *
+   * For files >64KB the content is split into chunks. Chunk docs are NOT
+   * persisted here — they are returned alongside the parent doc so that
+   * the caller (SyncEngine) can encrypt them before writing to localDB.
+   */
+  async fileToDoc(file: TFile): Promise<{ doc: SinkDoc; chunkData?: string[]; chunkIds?: string[] }> {
     const isBinary = this.isBinaryFile(file.path);
     let content: string;
 
@@ -53,28 +61,19 @@ export class FileSerializer {
         const chunkHash = await this.hashContent(chunk);
         const chunkId = this.localDB.chunkId(chunkHash);
         chunkIds.push(chunkId);
-
-        // Store chunk (skip if it already exists — content-addressed)
-        try {
-          await this.localDB.get(chunkId);
-        } catch {
-          await this.localDB.put({
-            _id: chunkId,
-            type: "chunk",
-            data: chunk,
-          });
-        }
       }
 
       doc.chunks = chunkIds;
       doc.content = ""; // Content stored in chunks
+
+      return { doc, chunkData: chunks, chunkIds };
     }
 
-    return doc;
+    return { doc };
   }
 
   /** Convert a SinkDoc back to file content and write to vault */
-  async docToFile(doc: SinkDoc): Promise<void> {
+  async docToFile(doc: SinkDoc, chunkDecrypt?: ChunkDecryptFn): Promise<void> {
     if (doc.deleted) {
       const existing = this.vault.getAbstractFileByPath(doc.path);
       if (existing) {
@@ -88,8 +87,21 @@ export class FileSerializer {
     // Reassemble from chunks if needed
     if (doc.chunks && doc.chunks.length > 0) {
       const chunkContents: string[] = [];
+
+      // Decrypt chunk-by-chunk when an IV is present; keep plaintext chunks as-is.
+      const doDecrypt = chunkDecrypt ?? null;
+
       for (const chunkId of doc.chunks) {
         const chunk = await this.localDB.get(chunkId) as any;
+        if (doDecrypt && typeof chunk.iv === "string" && chunk.iv.length > 0) {
+          try {
+            chunkContents.push(await doDecrypt(chunk.data, chunk.iv));
+            continue;
+          } catch {
+            // Fall back to raw data for legacy/plaintext chunks.
+          }
+        }
+
         chunkContents.push(chunk.data);
       }
       content = chunkContents.join("");

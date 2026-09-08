@@ -27,6 +27,7 @@ export type SyncProgressCallback = (path: string, done: number, total: number) =
 
 interface PreparedChange extends PendingChange {
   remoteDoc: SinkDoc;
+  remoteEncrypted: boolean;
 }
 
 interface LocalFileState {
@@ -56,7 +57,22 @@ export class SyncEngine {
   private crypto: CryptoHelper | null = null;
   private handler: SyncEventHandler;
   private debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-  private processing: Set<string> = new Set(); // Paths currently being written by sync
+  // Maps path → timestamp when the sync write completed.
+  // Used to skip vault events caused by our own writes.
+  // Entries older than 100ms are treated as expired.
+  private processing: Map<string, number> = new Map();
+  private readonly PROCESSING_TIMEOUT_MS = 100;
+
+  /** Check if a path is currently being written by sync (with age check) */
+  private isProcessing(path: string): boolean {
+    const ts = this.processing.get(path);
+    if (!ts) return false;
+    if (Date.now() - ts > this.PROCESSING_TIMEOUT_MS) {
+      this.processing.delete(path); // clean stale entry
+      return false;
+    }
+    return true;
+  }
   private status: SyncStatus = "disconnected";
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private secondaryPushApproved = false;
@@ -191,7 +207,7 @@ export class SyncEngine {
   /** Handle a file being created or modified in the vault */
   async onFileChange(file: TFile): Promise<void> {
     // Skip if this change was caused by us writing from sync
-    if (this.processing.has(file.path)) return;
+    if (this.isProcessing(file.path)) return;
 
     // Skip config folder if disabled
     if (!this.settings.syncConfigFolder && file.path.startsWith(".obsidian/")) return;
@@ -216,7 +232,7 @@ export class SyncEngine {
 
   /** Handle a file being deleted in the vault */
   async onFileDelete(file: TAbstractFile): Promise<void> {
-    if (this.processing.has(file.path)) return;
+    if (this.isProcessing(file.path)) return;
     if (!this.settings.syncConfigFolder && file.path.startsWith(".obsidian/")) return;
     if (file.path === ".obsidian/plugins/sink/data.json") return;
 
@@ -225,7 +241,7 @@ export class SyncEngine {
 
   /** Handle a file being renamed in the vault */
   async onFileRename(file: TAbstractFile, oldPath: string): Promise<void> {
-    if (this.processing.has(file.path) || this.processing.has(oldPath)) return;
+    if (this.isProcessing(file.path) || this.isProcessing(oldPath)) return;
     if (!this.settings.syncConfigFolder && file.path.startsWith(".obsidian/")) return;
 
     // Rename = delete old + create new
@@ -235,12 +251,13 @@ export class SyncEngine {
     }
   }
 
-  /** Push a local file to the database */
+  /** Push a local file to the database (with chunk encryption) */
   private async pushFile(file: TFile): Promise<void> {
     try {
       if (!(await this.ensurePushAllowed(`upload ${file.path}`))) return;
 
-      let doc = await this.serializer.fileToDoc(file);
+      const result = await this.serializer.fileToDoc(file);
+      let doc = result.doc;
       doc.deviceName = this.settings.deviceName;
       doc.deviceId = this.settings.deviceId;
 
@@ -256,6 +273,9 @@ export class SyncEngine {
       }
 
       await this.localDB.put(doc);
+
+      await this.persistChunks(result.chunkData, result.chunkIds);
+
       await this.upsertDeviceRecord({ lastPushAt: Date.now() });
       this.handler({ type: "doc-pushed", path: file.path });
     } catch (e: any) {
@@ -263,14 +283,16 @@ export class SyncEngine {
       if (e.status === 409) {
         const latest = await this.localDB.getByPath(file.path);
         if (latest) {
-          const doc = await this.serializer.fileToDoc(file);
-          doc._rev = latest._rev;
-          doc.deviceName = this.settings.deviceName;
-          doc.deviceId = this.settings.deviceId;
+          const res = await this.serializer.fileToDoc(file);
+          res.doc._rev = latest._rev;
+          res.doc.deviceName = this.settings.deviceName;
+          res.doc.deviceId = this.settings.deviceId;
           if (this.crypto) {
-            await this.localDB.put(await this.encryptDoc(doc));
+            await this.localDB.put(await this.encryptDoc(res.doc));
+            await this.persistChunks(res.chunkData, res.chunkIds);
           } else {
-            await this.localDB.put(doc);
+            await this.localDB.put(res.doc);
+            await this.persistChunks(res.chunkData, res.chunkIds);
           }
           await this.upsertDeviceRecord({ lastPushAt: Date.now() });
         }
@@ -622,8 +644,9 @@ export class SyncEngine {
       if (doc.deviceId && doc.deviceId === this.settings.deviceId) continue;
       if (!doc.deviceId && doc.deviceName === this.settings.deviceName) continue;
 
+      const remoteEncrypted = !!doc.iv;
       let remoteDoc = doc;
-      if (this.crypto && doc.iv) {
+      if (this.crypto && remoteEncrypted) {
         remoteDoc = await this.decryptDoc(doc);
       }
 
@@ -643,6 +666,7 @@ export class SyncEngine {
         isBinary: local.isBinary || this.isBinaryPath(remoteDoc.path),
         suggested,
         remoteDoc,
+        remoteEncrypted,
       });
     }
 
@@ -806,9 +830,15 @@ export class SyncEngine {
   }
 
   private async applyRemoteChange(change: PreparedChange): Promise<void> {
-    this.processing.add(change.path);
+    this.processing.set(change.path, Date.now());
     try {
-      await this.serializer.docToFile(change.remoteDoc);
+      // Decrypt chunks when the source doc was encrypted before preparation.
+      const decryptChunk = this.crypto && change.remoteEncrypted
+        ? async (ciphertext: string, iv: string) => {
+            return await this.crypto!.decrypt(ciphertext, iv);
+          }
+        : undefined;
+      await this.serializer.docToFile(change.remoteDoc, decryptChunk);
       await this.upsertDeviceRecord({ lastPullAt: Date.now() });
       this.handler({
         type: "doc-pulled",
@@ -817,7 +847,7 @@ export class SyncEngine {
         sourceDeviceId: change.sourceDeviceId,
       });
     } finally {
-      setTimeout(() => this.processing.delete(change.path), 500);
+      this.processing.delete(change.path);
     }
   }
 
@@ -862,7 +892,7 @@ export class SyncEngine {
       return;
     }
 
-    this.processing.add(change.path);
+    this.processing.set(change.path, Date.now());
     try {
       const existing = this.vault.getAbstractFileByPath(change.path);
       if (existing instanceof TFile) {
@@ -877,7 +907,7 @@ export class SyncEngine {
         await this.pushFile(updated);
       }
     } finally {
-      setTimeout(() => this.processing.delete(change.path), 500);
+      this.processing.delete(change.path);
     }
   }
 
@@ -917,11 +947,11 @@ export class SyncEngine {
     const existing = this.vault.getAbstractFileByPath(entry.path);
     if (!entry.existed) {
       if (existing) {
-        this.processing.add(entry.path);
+        this.processing.set(entry.path, Date.now());
         try {
           await this.vault.delete(existing);
         } finally {
-          setTimeout(() => this.processing.delete(entry.path), 500);
+          this.processing.delete(entry.path);
         }
       }
       return;
@@ -937,11 +967,11 @@ export class SyncEngine {
       type: "file",
     };
 
-    this.processing.add(entry.path);
+    this.processing.set(entry.path, Date.now());
     try {
       await this.serializer.docToFile(doc);
     } finally {
-      setTimeout(() => this.processing.delete(entry.path), 500);
+      this.processing.delete(entry.path);
     }
   }
 
@@ -966,6 +996,36 @@ export class SyncEngine {
     const existing = this.vault.getAbstractFileByPath(dirPath);
     if (!existing) {
       await this.vault.createFolder(dirPath);
+    }
+  }
+
+  private async persistChunks(chunkData?: string[], chunkIds?: string[]): Promise<void> {
+    if (!chunkData || !chunkIds) return;
+
+    if (this.crypto) {
+      for (let i = 0; i < chunkData.length; i++) {
+        const { ciphertext, iv } = await this.crypto.encrypt(chunkData[i]);
+        await this.localDB.put({
+          _id: chunkIds[i],
+          type: "chunk",
+          data: ciphertext,
+          iv,
+        });
+      }
+      return;
+    }
+
+    for (let i = 0; i < chunkData.length; i++) {
+      const chunkId = chunkIds[i];
+      try {
+        await this.localDB.get(chunkId);
+      } catch {
+        await this.localDB.put({
+          _id: chunkId,
+          type: "chunk",
+          data: chunkData[i],
+        });
+      }
     }
   }
 
