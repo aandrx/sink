@@ -1,6 +1,6 @@
 {
   "name": "sink",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "Simplified Obsidian LiveSync plugin — always-on sync via CouchDB",
   "main": "main.js",
   "scripts": {

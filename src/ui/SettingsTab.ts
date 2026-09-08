@@ -1,4 +1,4 @@
-import { App, Modal, PluginSettingTab, Setting, Notice, TFile } from "obsidian";
+import { App, DropdownComponent, Modal, PluginSettingTab, Setting, Notice, TFile } from "obsidian";
 import type SinkPlugin from "../SinkPlugin";
 import type { DeviceRole, KnownDevice, SnapshotFileEntry, SnapshotMetaDoc, SnapshotSummary } from "../settings";
 import type { SyncEngine } from "../sync/SyncEngine";
@@ -17,6 +17,7 @@ export class SinkSettingsTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
+    containerEl.addClass("sink-settings-root");
 
     containerEl.createEl("h1", { text: "Sink" });
     containerEl.createEl("p", {
@@ -204,7 +205,6 @@ export class SinkSettingsTab extends PluginSettingTab {
       dropdown
         .addOption("primary", "Primary")
         .addOption("secondary", "Secondary")
-        .setValue("primary")
         .onChange(async (value) => {
           const engine = this.plugin.getSyncEngine();
           if (!engine || !this.plugin.settings.deviceId) return;
@@ -292,13 +292,13 @@ export class SinkSettingsTab extends PluginSettingTab {
       );
   }
 
-  private async populateCurrentRole(dropdown: HTMLSelectElement): Promise<void> {
+  private async populateCurrentRole(dropdown: DropdownComponent): Promise<void> {
     const engine = this.plugin.getSyncEngine();
     if (!engine) return;
 
     const devices = await engine.refreshKnownDevices();
     const current = devices.find((device) => device.isCurrentDevice);
-    dropdown.value = current?.role ?? (await engine.getCurrentDeviceRole());
+    dropdown.setValue(current?.role ?? (await engine.getCurrentDeviceRole()));
   }
 
   private async renderKnownDevices(container: HTMLElement, infoEl: HTMLElement, refresh: boolean): Promise<void> {
@@ -500,6 +500,7 @@ export class SinkSettingsTab extends PluginSettingTab {
 
     const modal = new Modal(this.app);
     modal.onOpen = () => {
+      modal.modalEl.addClass("mod-sink-wide");
       const { contentEl } = modal;
       contentEl.empty();
       contentEl.addClass("sink-conflict-modal");

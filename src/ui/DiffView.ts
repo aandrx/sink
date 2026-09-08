@@ -128,6 +128,7 @@ export function openSplitDiffModal(
 ): void {
   const modal = new Modal(app);
   modal.onOpen = () => {
+    modal.modalEl.addClass("mod-sink-wide");
     const { contentEl } = modal;
     contentEl.empty();
     contentEl.addClass("sink-conflict-modal");

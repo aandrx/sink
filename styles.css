@@ -43,6 +43,10 @@
   opacity: 0.5;
 }
 
+.sink-floating-status:hover {
+  opacity: 1;
+}
+
 /* Color overrides — remove grayscale and apply status color */
 .sink-floating-status div.sink-floating-connected {
   filter: none;
@@ -88,27 +92,35 @@
 }
 
 /* --- Conflict / Diff Modal --- */
+.modal.mod-sink-wide {
+  width: min(98vw, 1900px);
+  max-width: min(98vw, 1900px);
+}
+
 .sink-conflict-modal {
-  width: min(96vw, 1600px);
-  max-width: min(96vw, 1600px);
+  width: 100%;
+  max-width: 100%;
 }
 
 .sink-conflict-modal .sink-diff-split {
   display: flex;
   gap: 10px;
   max-height: 55vh;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   width: 100%;
 }
 
 .sink-conflict-modal .sink-diff-pane {
   flex: 1;
   min-width: 0;
+  max-width: calc(50% - 5px);
   padding: 8px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
   background: var(--background-secondary);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .sink-conflict-modal .sink-diff-pane h4 {
@@ -135,6 +147,7 @@
 
 .sink-conflict-modal .sink-diff-line-text {
   min-width: 0;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -265,95 +278,68 @@
   font-size: var(--font-ui-small);
 }
 
-
-.sink-floating-status:hover {
-  opacity: 1;
+/* --- Settings Tab Polish --- */
+.sink-settings-root h1 {
+  margin-bottom: 6px;
 }
 
-.sink-floating-message {
-  color: var(--text-muted);
-  white-space: nowrap;
-  transition: opacity 0.4s;
+.sink-settings-root > .setting-item-description:first-of-type {
+  margin-bottom: 14px;
 }
 
-.sink-floating-message-hidden {
-  opacity: 0;
+.sink-settings-root h2 {
+  margin-top: 20px;
+  margin-bottom: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
 }
 
-.sink-floating-syncing .sink-floating-message {
-  color: var(--color-blue);
+.sink-settings-root .setting-item {
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 85%, transparent);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: color-mix(in srgb, var(--background-primary) 92%, var(--background-secondary));
 }
 
-.sink-floating-error .sink-floating-message {
-  color: var(--text-error);
+.sink-settings-root .setting-item:hover {
+  background: color-mix(in srgb, var(--background-primary) 88%, var(--background-secondary));
 }
 
-/* --- Status Bar --- */
-.sink-statusbar {
-  cursor: default;
-  font-size: var(--font-smaller);
+.sink-settings-root .setting-item-description {
+  line-height: 1.35;
 }
 
-.sink-status-syncing {
-  animation: sink-pulse 1.2s ease-in-out infinite;
+/* --- Batch Review Polish --- */
+.sink-batch-summary {
+  margin-top: -4px;
+  margin-bottom: 8px;
 }
 
-@keyframes sink-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+.sink-batch-list {
+  max-height: min(55vh, 620px);
+  overflow: auto;
+  padding-right: 4px;
 }
 
-.sink-status-error {
-  color: var(--text-error);
-}
-
-.sink-status-connected {
-  color: var(--color-green);
-}
-
-/* --- Ribbon Icon --- */
-.sink-ribbon-connected svg {
-  color: var(--color-green) !important;
-  stroke: var(--color-green) !important;
-}
-
-.sink-ribbon-syncing svg {
-  color: var(--color-blue) !important;
-  stroke: var(--color-blue) !important;
-  animation: sink-spin 1s linear infinite;
-}
-
-.sink-ribbon-error svg {
-  color: var(--text-error) !important;
-  stroke: var(--text-error) !important;
-}
-
-.sink-ribbon-disconnected svg {
-  opacity: 0.4;
-}
-
-@keyframes sink-spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
-
-/* --- Conflict Modal --- */
-.sink-conflict-modal .sink-diff-container {
-  display: flex;
-  gap: 8px;
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.sink-conflict-modal .sink-diff-side {
-  flex: 1;
-  padding: 8px;
+.sink-batch-row {
   border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  font-family: var(--font-monospace);
-  font-size: var(--font-smaller);
-  white-space: pre-wrap;
-  overflow-x: auto;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: var(--background-primary);
+}
+
+.sink-batch-row .setting-item {
+  border: 0;
+  margin-bottom: 0;
+  background: transparent;
+}
+
+.sink-batch-row .setting-item-name,
+.sink-batch-row .setting-item-description {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* --- Setup Wizard --- */
@@ -364,52 +350,4 @@
 .sink-setup-wizard .sink-step-header {
   font-weight: 600;
   margin-bottom: 8px;
-}
-
-.sink-setup-wizard .sink-uri-display {
-  font-family: var(--font-monospace);
-  font-size: var(--font-smaller);
-  padding: 8px;
-  background: var(--background-secondary);
-  border-radius: 4px;
-  word-break: break-all;
-  user-select: all;
-}
-
-
-.sink-conflict-modal .sink-diff-container {
-  display: flex;
-  gap: 8px;
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.sink-conflict-modal .sink-diff-side {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  font-family: var(--font-monospace);
-  font-size: var(--font-smaller);
-  white-space: pre-wrap;
-  overflow-x: auto;
-}
-
-.sink-setup-wizard .sink-step {
-  margin-bottom: 16px;
-}
-
-.sink-setup-wizard .sink-step-header {
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-
-.sink-setup-wizard .sink-uri-display {
-  font-family: var(--font-monospace);
-  font-size: var(--font-smaller);
-  padding: 8px;
-  background: var(--background-secondary);
-  border-radius: 4px;
-  word-break: break-all;
-  user-select: all;
 }

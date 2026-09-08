@@ -37,6 +37,7 @@ export class BatchReviewModal extends Modal {
 	}
 
 	onOpen(): void {
+		this.modalEl.addClass("mod-sink-wide");
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.addClass("sink-conflict-modal");
@@ -45,6 +46,10 @@ export class BatchReviewModal extends Modal {
 		contentEl.createEl("p", {
 			text: "Review risky sync changes before applying. Choose what to keep for each file.",
 			cls: "setting-item-description",
+		});
+		contentEl.createEl("p", {
+			text: `${this.changes.length} file${this.changes.length === 1 ? "" : "s"} in this batch`,
+			cls: "setting-item-description sink-batch-summary",
 		});
 
 		new Setting(contentEl)
@@ -64,10 +69,7 @@ export class BatchReviewModal extends Modal {
 				btn
 					.setButtonText("Apply selected")
 					.setCta()
-					.onClick(() => {
-						const decisions = this.collectDecisions();
-						this.resolveAndClose({ approved: true, decisions });
-					})
+					.onClick(() => this.applySelected())
 			)
 			.addDropdown((dropdown) =>
 				dropdown
@@ -92,10 +94,7 @@ export class BatchReviewModal extends Modal {
 			.addButton((btn) =>
 				btn.setButtonText("Apply Selected")
 					.setCta()
-					.onClick(() => {
-						const decisions = this.collectDecisions();
-						this.resolveAndClose({ approved: true, decisions });
-					})
+					.onClick(() => this.applySelected())
 			);
 	}
 
@@ -160,6 +159,7 @@ export class BatchReviewModal extends Modal {
 	private showDiff(change: PendingChange): void {
 		const popup = new Modal(this.app);
 		popup.onOpen = () => {
+			popup.modalEl.addClass("mod-sink-wide");
 			const { contentEl } = popup;
 			contentEl.empty();
 			contentEl.createEl("h3", { text: change.path });
@@ -217,8 +217,9 @@ export class BatchReviewModal extends Modal {
 		this.close();
 	}
 
-	private truncate(text: string, maxLen: number): string {
-		if (text.length <= maxLen) return text;
-		return text.slice(0, maxLen) + "\n... (truncated)";
+
+	private applySelected(): void {
+		const decisions = this.collectDecisions();
+		this.resolveAndClose({ approved: true, decisions });
 	}
 }

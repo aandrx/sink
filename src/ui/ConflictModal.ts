@@ -16,6 +16,7 @@ export class ConflictModal extends Modal {
   }
 
   onOpen() {
+    this.modalEl.addClass("mod-sink-wide");
     const { contentEl } = this;
     contentEl.addClass("sink-conflict-modal");
 

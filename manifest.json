@@ -1,7 +1,7 @@
 {
   "id": "sink",
   "name": "Sink",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "minAppVersion": "1.4.0",
   "description": "Simple, always-on vault sync via self-hosted CouchDB. Set it up once, forget about it.",
   "author": "andrx",
