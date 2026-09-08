@@ -5,6 +5,7 @@ import { StatusBar, RibbonIcon } from "./ui/StatusBar";
 import { FloatingStatus } from "./ui/FloatingStatus";
 import { SetupWizard } from "./ui/SetupWizard";
 import { ConflictModal } from "./ui/ConflictModal";
+import { UpdateNotesModal } from "./ui/UpdateNotesModal";
 import { parseSetupURI, applySetupPayload } from "./utils/uri";
 import { DEFAULT_SETTINGS, type SinkSettings, type SyncStatus } from "./settings";
 
@@ -17,6 +18,7 @@ export default class SinkPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
+    await this.maybeShowUpdateNotes();
 
     // Add settings tab
     this.addSettingTab(new SinkSettingsTab(this.app, this));
@@ -233,5 +235,18 @@ export default class SinkPlugin extends Plugin {
     if (this.syncEngine) {
       this.syncEngine.updateSettings(this.settings);
     }
+  }
+
+  private async maybeShowUpdateNotes(): Promise<void> {
+    const currentVersion = this.manifest.version;
+    const previousVersion = this.settings.lastSeenVersion;
+    if (previousVersion === currentVersion) return;
+
+    this.settings.lastSeenVersion = currentVersion;
+    await this.saveData(this.settings);
+
+    this.app.workspace.onLayoutReady(() => {
+      new UpdateNotesModal(this.app, previousVersion, currentVersion).open();
+    });
   }
 }

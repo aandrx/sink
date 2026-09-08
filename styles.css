@@ -351,3 +351,26 @@
   font-weight: 600;
   margin-bottom: 8px;
 }
+
+/* --- Update Notes Modal --- */
+.sink-update-notes-modal h3 {
+  margin-top: 14px;
+  margin-bottom: 6px;
+}
+
+.sink-update-notes-list {
+  margin-top: 4px;
+  margin-bottom: 10px;
+}
+
+.sink-update-notes-history {
+  margin-top: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--background-secondary);
+}
+
+.sink-update-note-block h4 {
+  margin: 10px 0 4px 0;
+}

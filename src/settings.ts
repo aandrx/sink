@@ -21,6 +21,8 @@ export interface SinkSettings {
   isConfigured: boolean;
   /** Sync .obsidian/ config folder */
   syncConfigFolder: boolean;
+  /** Last plugin version that already showed update notes */
+  lastSeenVersion: string;
 }
 
 export const DEFAULT_SETTINGS: SinkSettings = {
@@ -35,6 +37,7 @@ export const DEFAULT_SETTINGS: SinkSettings = {
   deviceId: "",
   isConfigured: false,
   syncConfigFolder: true,
+  lastSeenVersion: "",
 };
 
 export type DeviceRole = "primary" | "secondary";
