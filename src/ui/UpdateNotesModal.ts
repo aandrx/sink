@@ -8,6 +8,27 @@ interface ReleaseNote {
 
 const LATEST_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.2.14",
+    title: "Sync Stability and Editor-Style Diffs",
+    points: [
+      "New side-by-side diff viewer with aligned lines, inline highlights, synchronized scrolling, collapsed context, and change navigation.",
+      "Fixed duplicate vault listeners after restarts; serialized sync work and improved shutdown cleanup and error handling.",
+      "Incoming changes now respect config-sync settings. Workspace state, plugin-enable lists, and Sink's own directory are always excluded.",
+      "Fixed chunked-text review/merge, fail-closed decryption, and publishing file chunks before their parent documents.",
+      "Reduced database query and preview memory pressure. Files have a 20 MiB safety limit and snapshots a 32 MiB estimated memory budget.",
+      "Config sync defaults off for new setups; existing saved settings are unchanged. Grey-screen crash causality remains unconfirmed—test with backups before enabling Sink in a live vault.",
+    ],
+  },
+  {
+    version: "0.2.13",
+    title: "Encrypted Chunk Sync Reliability Fixes",
+    points: [
+      "Fixed encrypted large-file pull path so chunk decryption works after parent-doc preparation.",
+      "Aligned chunk persistence behavior between normal push and 409 retry paths.",
+      "Improved chunk reassembly fallback handling for mixed encrypted/plain chunk states.",
+    ],
+  },
+  {
     version: "0.2.11",
     title: "Diff and Settings UI Polish",
     points: [

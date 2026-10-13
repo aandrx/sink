@@ -21,6 +21,7 @@ import { FileSerializer } from "./FileSerializer";
 import { ConflictResolver } from "./ConflictResolver";
 import { CryptoHelper } from "../utils/crypto";
 import { BatchReviewModal } from "../ui/BatchReviewModal";
+import { arrayBufferToBase64, assertFileSize, isSyncPathAllowed, MAX_CONTENT_LENGTH, MAX_SNAPSHOT_BYTES } from "./safety";
 
 export type SyncEventHandler = (event: SyncEvent) => void;
 export type SyncProgressCallback = (path: string, done: number, total: number) => void;
@@ -57,7 +58,7 @@ export class SyncEngine {
   private crypto: CryptoHelper | null = null;
   private handler: SyncEventHandler;
   private debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-  // Maps path → timestamp when the sync write completed.
+  // Maps path → Infinity during a write, then its completion timestamp.
   // Used to skip vault events caused by our own writes.
   // Entries older than 100ms are treated as expired.
   private processing: Map<string, number> = new Map();
@@ -80,6 +81,67 @@ export class SyncEngine {
   private reviewPromise: Promise<ReviewResult> | null = null;
   private sessionMergeAllowed = false;
   private remoteHeadState: "head" | "behind" = "head";
+  private stopped = false;
+  private operationQueue: Promise<unknown> = Promise.resolve();
+  private pendingIncoming = new Set<string>();
+  private deferredIncoming = new Set<string>();
+  private incomingScheduled = false;
+  private reviewModal: BatchReviewModal | null = null;
+  private approvalModal: Modal | null = null;
+
+  private reportError(context: string, error: unknown): void {
+    this.handler({ type: "error", message: `${context}: ${error instanceof Error ? error.message : String(error)}` });
+  }
+
+  private isPathAllowed(path: string): boolean {
+    return isSyncPathAllowed(path, this.vault.configDir, this.settings.syncConfigFolder);
+  }
+
+  /** Serialize vault mutations and uploads, without retaining incoming document bodies. */
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.operationQueue.then(operation);
+    this.operationQueue = result.catch(() => undefined);
+    return result;
+  }
+
+  private scheduleIncoming(docs: SinkDoc[]): void {
+    if (this.stopped) return;
+    for (const doc of docs) {
+      if (doc.type === "file" && this.isPathAllowed(doc.path)) this.pendingIncoming.add(doc._id);
+      if (doc.type === "chunk") {
+        for (const id of this.deferredIncoming) this.pendingIncoming.add(id);
+        this.deferredIncoming.clear();
+      }
+    }
+    if (this.incomingScheduled || this.pendingIncoming.size === 0) return;
+    this.incomingScheduled = true;
+    void this.enqueue(async () => {
+      try {
+        while (!this.stopped && this.pendingIncoming.size > 0) {
+          const ids = Array.from(this.pendingIncoming).slice(0, 5);
+          const batch: SinkDoc[] = [];
+          for (const id of ids) {
+            this.pendingIncoming.delete(id);
+            try {
+              batch.push(await this.localDB.get(id) as SinkDoc);
+            } catch (error) {
+              this.reportError("Incoming document lookup failed", error);
+            }
+          }
+          try {
+            await this.handleIncomingChanges(batch);
+          } catch (error) {
+            this.reportError("Incoming sync failed", error);
+          }
+          // Yield to the renderer between batches, including on fast local databases.
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+      } finally {
+        // Clear before the queue promise resolves so the next change cannot be stranded.
+        this.incomingScheduled = false;
+      }
+    }).catch((error) => this.reportError("Incoming queue failed", error));
+  }
 
   constructor(app: App, vault: Vault, settings: SinkSettings, vaultName: string, pluginVersion: string, handler: SyncEventHandler) {
     this.app = app;
@@ -96,6 +158,7 @@ export class SyncEngine {
 
   /** Initialize and start syncing */
   async start(): Promise<void> {
+    this.stopped = false;
     // Initialize encryption if passphrase is set
     if (this.settings.passphrase) {
       this.crypto = new CryptoHelper(this.settings.passphrase);
@@ -108,7 +171,7 @@ export class SyncEngine {
     this.replicator = new Replicator(this.localDB, this.remoteDB, (event) => {
       switch (event.type) {
         case "change":
-          this.handleIncomingChanges(event.docs as SinkDoc[]);
+          this.scheduleIncoming(event.docs as SinkDoc[]);
           break;
         case "status":
           this.status = event.status;
@@ -127,7 +190,7 @@ export class SyncEngine {
     } catch (error: any) {
       this.handler({ type: "error", message: `Device registry update skipped at startup: ${error.message}` });
     }
-    this.startHeartbeat();
+    if (!this.stopped) this.startHeartbeat();
   }
 
   /** Recover or create a stable device identity before syncing starts */
@@ -184,6 +247,11 @@ export class SyncEngine {
 
   /** Stop syncing and clean up */
   async stop(): Promise<void> {
+    this.stopped = true;
+    this.pendingIncoming.clear();
+    this.deferredIncoming.clear();
+    this.reviewModal?.close();
+    this.approvalModal?.close();
     // Cancel all debounce timers
     for (const timer of this.debounceTimers.values()) {
       clearTimeout(timer);
@@ -204,16 +272,17 @@ export class SyncEngine {
     await this.remoteDB.disconnect();
   }
 
+  /** Plugin replacements must also release the IndexedDB connection. */
+  async shutdown(): Promise<void> {
+    await this.stop();
+    await this.operationQueue;
+    await this.localDB.close();
+  }
+
   /** Handle a file being created or modified in the vault */
   async onFileChange(file: TFile): Promise<void> {
     // Skip if this change was caused by us writing from sync
-    if (this.isProcessing(file.path)) return;
-
-    // Skip config folder if disabled
-    if (!this.settings.syncConfigFolder && file.path.startsWith(".obsidian/")) return;
-
-    // Skip our own plugin data
-    if (file.path === ".obsidian/plugins/sink/data.json") return;
+    if (this.stopped || this.isProcessing(file.path) || !this.isPathAllowed(file.path)) return;
 
     // Debounce: wait for syncDelay ms of inactivity before pushing
     const existingTimer = this.debounceTimers.get(file.path);
@@ -225,35 +294,38 @@ export class SyncEngine {
       file.path,
       setTimeout(() => {
         this.debounceTimers.delete(file.path);
-        this.pushFile(file);
+        void this.enqueue(() => this.pushFile(file)).catch((error) => this.reportError(`Push failed for ${file.path}`, error));
       }, this.settings.syncDelay)
     );
   }
 
   /** Handle a file being deleted in the vault */
   async onFileDelete(file: TAbstractFile): Promise<void> {
-    if (this.isProcessing(file.path)) return;
-    if (!this.settings.syncConfigFolder && file.path.startsWith(".obsidian/")) return;
-    if (file.path === ".obsidian/plugins/sink/data.json") return;
-
-    await this.pushDeletion(file.path);
+    if (this.stopped || this.isProcessing(file.path) || !this.isPathAllowed(file.path)) return;
+    const timer = this.debounceTimers.get(file.path);
+    if (timer) clearTimeout(timer);
+    this.debounceTimers.delete(file.path);
+    await this.enqueue(() => this.pushDeletion(file.path));
   }
 
   /** Handle a file being renamed in the vault */
   async onFileRename(file: TAbstractFile, oldPath: string): Promise<void> {
-    if (this.isProcessing(file.path) || this.isProcessing(oldPath)) return;
-    if (!this.settings.syncConfigFolder && file.path.startsWith(".obsidian/")) return;
-
-    // Rename = delete old + create new
-    await this.pushDeletion(oldPath);
-    if (file instanceof Object && "stat" in file) {
-      await this.pushFile(file as TFile);
-    }
+    if (this.stopped || this.isProcessing(file.path) || this.isProcessing(oldPath)) return;
+    const timer = this.debounceTimers.get(oldPath);
+    if (timer) clearTimeout(timer);
+    this.debounceTimers.delete(oldPath);
+    await this.enqueue(async () => {
+      // Check both sides independently when moving into/out of an excluded folder.
+      if (this.isPathAllowed(oldPath)) await this.pushDeletion(oldPath);
+      if (file instanceof TFile && this.isPathAllowed(file.path)) await this.pushFile(file);
+    });
   }
 
   /** Push a local file to the database (with chunk encryption) */
   private async pushFile(file: TFile): Promise<void> {
     try {
+      if (this.stopped || !this.isPathAllowed(file.path)) return;
+      if (this.vault.getAbstractFileByPath(file.path) !== file) return;
       if (!(await this.ensurePushAllowed(`upload ${file.path}`))) return;
 
       const result = await this.serializer.fileToDoc(file);
@@ -272,9 +344,9 @@ export class SyncEngine {
         doc._rev = existing._rev;
       }
 
-      await this.localDB.put(doc);
-
       await this.persistChunks(result.chunkData, result.chunkIds);
+      if (this.stopped || !this.isPathAllowed(file.path)) return;
+      await this.localDB.put(doc);
 
       await this.upsertDeviceRecord({ lastPushAt: Date.now() });
       this.handler({ type: "doc-pushed", path: file.path });
@@ -287,12 +359,12 @@ export class SyncEngine {
           res.doc._rev = latest._rev;
           res.doc.deviceName = this.settings.deviceName;
           res.doc.deviceId = this.settings.deviceId;
+          await this.persistChunks(res.chunkData, res.chunkIds);
+          if (this.stopped || !this.isPathAllowed(file.path)) return;
           if (this.crypto) {
             await this.localDB.put(await this.encryptDoc(res.doc));
-            await this.persistChunks(res.chunkData, res.chunkIds);
           } else {
             await this.localDB.put(res.doc);
-            await this.persistChunks(res.chunkData, res.chunkIds);
           }
           await this.upsertDeviceRecord({ lastPushAt: Date.now() });
         }
@@ -305,10 +377,12 @@ export class SyncEngine {
   /** Push a deletion to the database */
   private async pushDeletion(path: string): Promise<void> {
     try {
+      if (this.stopped || !this.isPathAllowed(path)) return;
       if (!(await this.ensurePushAllowed(`delete ${path}`))) return;
 
       const existing = await this.localDB.getByPath(path);
       if (existing) {
+        if (this.stopped || !this.isPathAllowed(path)) return;
         const doc = this.serializer.createDeletionDoc(path);
         doc._rev = existing._rev;
         doc.deviceName = this.settings.deviceName;
@@ -324,6 +398,7 @@ export class SyncEngine {
 
   /** Handle documents coming in from replication */
   private async handleIncomingChanges(docs: SinkDoc[]): Promise<void> {
+    if (this.stopped) return;
     const prepared = await this.prepareIncomingChanges(docs);
     if (prepared.length === 0) return;
     this.remoteHeadState = "behind";
@@ -350,18 +425,20 @@ export class SyncEngine {
 
   /** Perform initial full sync (push local vault to server) */
   async pushVaultToServer(onProgress?: SyncProgressCallback): Promise<number> {
+    return this.enqueue(() => this.pushVaultToServerInternal(onProgress));
+  }
+
+  private async pushVaultToServerInternal(onProgress?: SyncProgressCallback): Promise<number> {
+    if (this.stopped) return 0;
     if (!(await this.ensurePushAllowed("push the local vault to the server"))) {
       return 0;
     }
 
-    const files = this.vault.getFiles().filter((f) => {
-      if (!this.settings.syncConfigFolder && f.path.startsWith(".obsidian/")) return false;
-      if (f.path === ".obsidian/plugins/sink/data.json") return false;
-      return true;
-    });
+    const files = this.vault.getFiles().filter((f) => this.isPathAllowed(f.path));
     const total = files.length;
     let count = 0;
     for (const file of files) {
+      if (this.stopped) break;
       await this.pushFile(file);
       count++;
       onProgress?.(file.path, count, total);
@@ -371,6 +448,11 @@ export class SyncEngine {
 
   /** Pull all docs from remote and write to vault */
   async pullServerToVault(onProgress?: SyncProgressCallback): Promise<number> {
+    return this.enqueue(() => this.pullServerToVaultInternal(onProgress));
+  }
+
+  private async pullServerToVaultInternal(onProgress?: SyncProgressCallback): Promise<number> {
+    if (this.stopped) return 0;
     // First do a one-shot pull (remote → local DB)
     if (this.replicator) {
       await this.replicator.pullOnce();
@@ -378,25 +460,21 @@ export class SyncEngine {
 
     await this.upsertDeviceRecord({ lastPullAt: Date.now() });
 
-    // Then read all file docs from local DB and write them to the vault
-    const result = await this.localDB.allDocs();
-    const rows = result.rows.filter((row) => {
-      const doc = row.doc as SinkDoc;
-      return doc && doc.type === "file";
-    });
-    const docs = rows.map((row) => row.doc as SinkDoc);
-    const prepared = await this.prepareIncomingChanges(docs);
-    const total = prepared.length;
-    let index = 0;
-
-    const applied = await this.applyIncomingChangesWithReview(prepared, "Review pull changes", () => {
-      index += 1;
-      const current = prepared[Math.min(index - 1, prepared.length - 1)];
-      if (current) {
-        onProgress?.(current.path, index, total);
-      }
-    });
-
+    // Page file documents only; never materialize chunks/snapshots/the entire DB.
+    let startkey = "file:";
+    let skip = 0;
+    let applied = 0;
+    while (!this.stopped) {
+      const result = await this.localDB.allDocs({ startkey, endkey: "file:\uffff", limit: 5, skip });
+      if (result.rows.length === 0) break;
+      const docs = result.rows.filter((row) => row.doc?.type === "file").map((row) => row.doc as SinkDoc);
+      const prepared = await this.prepareIncomingChanges(docs);
+      applied += await this.applyIncomingChangesWithReview(prepared, "Review pull changes");
+      for (const change of prepared) onProgress?.(change.path, applied, result.total_rows);
+      startkey = result.rows[result.rows.length - 1].id;
+      skip = 1;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
     return applied;
   }
 
@@ -417,16 +495,15 @@ export class SyncEngine {
   }
 
   async listSnapshots(limit = 20): Promise<SnapshotSummary[]> {
-    const docs = await this.localDB.getSnapshotDocs(limit);
-    return docs.map((doc) => ({
-      id: doc._id.replace(/^meta:snapshot:/, ""),
-      createdAt: doc.createdAt,
-      reason: doc.reason,
-      fileCount: doc.files.length,
-    }));
+    return this.localDB.getSnapshotSummaries(limit);
   }
 
   async restoreSnapshot(snapshotId: string): Promise<number> {
+    return this.enqueue(() => this.restoreSnapshotInternal(snapshotId));
+  }
+
+  private async restoreSnapshotInternal(snapshotId: string): Promise<number> {
+    if (this.stopped) return 0;
     const snapshot = await this.localDB.getSnapshotDoc(snapshotId);
     if (!snapshot) {
       throw new Error("Snapshot not found");
@@ -434,6 +511,8 @@ export class SyncEngine {
 
     let restored = 0;
     for (const entry of snapshot.files) {
+      if (this.stopped) break;
+      if (!this.isPathAllowed(entry.path)) continue;
       await this.restoreSnapshotEntry(entry);
       restored += 1;
     }
@@ -538,13 +617,13 @@ export class SyncEngine {
       this.crypto = null;
     }
 
-    void this.upsertDeviceRecord();
+    if (!this.stopped) void this.upsertDeviceRecord().catch((error) => this.reportError("Device update failed", error));
   }
 
   private startHeartbeat(): void {
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
-      void this.upsertDeviceRecord();
+      if (!this.stopped) void this.upsertDeviceRecord().catch((error) => this.reportError("Heartbeat failed", error));
     }, SyncEngine.DEVICE_HEARTBEAT_MS);
   }
 
@@ -561,6 +640,7 @@ export class SyncEngine {
   }
 
   private async ensurePushAllowed(action: string): Promise<boolean> {
+    if (this.stopped) return false;
     const versionAllowed = await this.ensureVersionCompatible(action);
     if (!versionAllowed) {
       return false;
@@ -603,6 +683,7 @@ export class SyncEngine {
   private async showApprovalModal(action: string): Promise<boolean> {
     return await new Promise<boolean>((resolve) => {
       const modal = new Modal(this.app);
+      this.approvalModal = modal;
       modal.onOpen = () => {
         const { contentEl } = modal;
         contentEl.empty();
@@ -627,6 +708,7 @@ export class SyncEngine {
       };
 
       modal.onClose = () => {
+        this.approvalModal = null;
         modal.contentEl.empty();
         resolve(false);
       };
@@ -639,35 +721,56 @@ export class SyncEngine {
     const prepared: PreparedChange[] = [];
 
     for (const doc of docs) {
+      if (this.stopped) break;
       if (!doc.type || doc.type !== "file") continue;
-      if (!doc.path) continue;
+      if (!doc.path || !this.isPathAllowed(doc.path)) continue;
       if (doc.deviceId && doc.deviceId === this.settings.deviceId) continue;
       if (!doc.deviceId && doc.deviceName === this.settings.deviceName) continue;
 
-      const remoteEncrypted = !!doc.iv;
-      let remoteDoc = doc;
-      if (this.crypto && remoteEncrypted) {
-        remoteDoc = await this.decryptDoc(doc);
+      try {
+        if (!doc.deleted) assertFileSize(doc.size, doc.path);
+        if (typeof doc.content !== "string" || doc.content.length > MAX_CONTENT_LENGTH * 2) {
+          throw new Error(`Invalid or oversized incoming content: ${doc.path}`);
+        }
+        const remoteEncrypted = !!doc.iv;
+        if (remoteEncrypted && !this.crypto) throw new Error(`Encrypted file requires a passphrase: ${doc.path}`);
+        let remoteDoc = doc;
+        if (this.crypto && remoteEncrypted) {
+          remoteDoc = await this.decryptDoc(doc);
+        }
+        const isBinary = this.isBinaryPath(doc.path);
+        if (!remoteDoc.deleted && !isBinary) {
+          const decryptChunk = this.crypto && remoteEncrypted
+            ? (data: string, iv: string) => this.crypto!.decrypt(data, iv)
+            : undefined;
+          // Keep the encryption flag for apply; decrypted parent IV is intentionally removed.
+          remoteDoc = { ...remoteDoc, content: await this.serializer.readDocContent(remoteDoc, decryptChunk), chunks: undefined };
+        }
+
+        const local = await this.readLocalFileState(doc.path);
+        if (!doc.deleted && local.exists && !local.isBinary && local.content === remoteDoc.content) continue;
+        if (doc.deleted && !local.exists) continue;
+        const suggested = this.suggestDecision(local, remoteDoc);
+
+        prepared.push({
+          path: remoteDoc.path,
+          sourceDevice: remoteDoc.deviceName ?? "unknown",
+          sourceDeviceId: remoteDoc.deviceId,
+          remoteMtime: remoteDoc.mtime,
+          localMtime: local.mtime,
+          remoteDeleted: !!remoteDoc.deleted,
+          localExists: local.exists,
+          localContent: local.isBinary ? "" : local.content,
+          remoteContent: isBinary ? "" : (remoteDoc.deleted ? "" : remoteDoc.content),
+          isBinary,
+          suggested,
+          remoteDoc,
+          remoteEncrypted,
+        });
+      } catch (error: any) {
+        if (error?.status === 404) this.deferredIncoming.add(doc._id);
+        else this.reportError(`Prepare failed for ${doc.path}`, error);
       }
-
-      const local = await this.readLocalFileState(doc.path);
-      const suggested = this.suggestDecision(local, remoteDoc);
-
-      prepared.push({
-        path: remoteDoc.path,
-        sourceDevice: remoteDoc.deviceName ?? "unknown",
-        sourceDeviceId: remoteDoc.deviceId,
-        remoteMtime: remoteDoc.mtime,
-        localMtime: local.mtime,
-        remoteDeleted: !!remoteDoc.deleted,
-        localExists: local.exists,
-        localContent: local.isBinary ? "" : local.content,
-        remoteContent: local.isBinary ? "" : (remoteDoc.deleted ? "" : remoteDoc.content),
-        isBinary: local.isBinary || this.isBinaryPath(remoteDoc.path),
-        suggested,
-        remoteDoc,
-        remoteEncrypted,
-      });
     }
 
     const latestByPath = new Map<string, PreparedChange>();
@@ -697,23 +800,30 @@ export class SyncEngine {
     title: string,
     onApplied?: () => void
   ): Promise<number> {
-    if (changes.length === 0) return 0;
+    if (this.stopped || changes.length === 0) return 0;
 
     if (!(await this.ensureVersionCompatible("apply incoming changes"))) {
       return 0;
     }
 
     const needsReview = await this.shouldReviewBatch(changes);
+    if (this.stopped) return 0;
     const review = needsReview
       ? await this.reviewBatch(title, changes)
       : this.acceptAll(changes);
 
-    if (!review.approved) {
+    if (this.stopped || !review.approved) {
       return 0;
     }
 
     const decisionByPath = new Map(review.decisions.map((decision) => [decision.path, decision]));
     const selected = changes.filter((change) => {
+      if (!this.isPathAllowed(change.path)) return false;
+      const current = this.vault.getAbstractFileByPath(change.path);
+      if ((current instanceof TFile ? current.stat.mtime : undefined) !== change.localMtime) {
+        this.handler({ type: "error", message: `Skipped ${change.path}: local file changed during sync review; pull again to review it.` });
+        return false;
+      }
       const selectedDecision = decisionByPath.get(change.path);
       return !!selectedDecision?.selected && selectedDecision.decision !== "skip";
     });
@@ -731,6 +841,8 @@ export class SyncEngine {
 
     let applied = 0;
     for (const change of selected) {
+      if (this.stopped) break;
+      if (!this.isPathAllowed(change.path)) continue;
       const decision = decisionByPath.get(change.path)?.decision ?? change.suggested;
       try {
         switch (decision) {
@@ -789,9 +901,13 @@ export class SyncEngine {
 
   private async reviewBatch(title: string, changes: PreparedChange[]): Promise<ReviewResult> {
     if (!this.reviewPromise) {
-      this.reviewPromise = BatchReviewModal.review(this.app, title, changes)
+      this.reviewPromise = new Promise<ReviewResult>((resolve) => {
+        this.reviewModal = new BatchReviewModal(this.app, title, changes, resolve);
+        this.reviewModal.open();
+      })
         .finally(() => {
           this.reviewPromise = null;
+          this.reviewModal = null;
         });
     }
 
@@ -801,9 +917,15 @@ export class SyncEngine {
   private async createSnapshot(reason: string, paths: string[], sourceDevice: string): Promise<string> {
     const uniq = Array.from(new Set(paths));
     const files: SnapshotFileEntry[] = [];
+    let bytes = 0;
 
     for (const path of uniq) {
-      const local = await this.readLocalFileState(path);
+      if (this.stopped) throw new Error("Sync stopped before snapshot");
+      const existing = this.vault.getAbstractFileByPath(path);
+      // Account conservatively for UTF-16/base64 strings before allocating them.
+      bytes += existing instanceof TFile ? existing.stat.size * 3 : 0;
+      if (bytes > MAX_SNAPSHOT_BYTES) throw new Error("Snapshot exceeds 32 MiB safety budget; incoming batch was not applied");
+      const local = await this.readLocalFileState(path, true);
       files.push({
         path,
         existed: local.exists,
@@ -830,7 +952,8 @@ export class SyncEngine {
   }
 
   private async applyRemoteChange(change: PreparedChange): Promise<void> {
-    this.processing.set(change.path, Date.now());
+    if (this.stopped || !this.isPathAllowed(change.path)) return;
+    this.processing.set(change.path, Infinity);
     try {
       // Decrypt chunks when the source doc was encrypted before preparation.
       const decryptChunk = this.crypto && change.remoteEncrypted
@@ -838,7 +961,7 @@ export class SyncEngine {
             return await this.crypto!.decrypt(ciphertext, iv);
           }
         : undefined;
-      await this.serializer.docToFile(change.remoteDoc, decryptChunk);
+      await this.serializer.docToFile(change.remoteDoc, decryptChunk, () => !this.stopped && this.isPathAllowed(change.path));
       await this.upsertDeviceRecord({ lastPullAt: Date.now() });
       this.handler({
         type: "doc-pulled",
@@ -847,7 +970,7 @@ export class SyncEngine {
         sourceDeviceId: change.sourceDeviceId,
       });
     } finally {
-      this.processing.delete(change.path);
+      this.processing.set(change.path, Date.now());
     }
   }
 
@@ -865,6 +988,12 @@ export class SyncEngine {
   }
 
   private async applyMerge(change: PreparedChange): Promise<void> {
+    if (this.stopped || !this.isPathAllowed(change.path)) return;
+    if (change.path.startsWith(`${this.vault.configDir}/`)) {
+      // Three-way text patches are not a safe merge strategy for settings/code.
+      await this.applyRemoteChange(change);
+      return;
+    }
     if (change.isBinary || change.remoteDeleted || !change.localExists) {
       await this.applyRemoteChange(change);
       return;
@@ -892,7 +1021,7 @@ export class SyncEngine {
       return;
     }
 
-    this.processing.set(change.path, Date.now());
+    this.processing.set(change.path, Infinity);
     try {
       const existing = this.vault.getAbstractFileByPath(change.path);
       if (existing instanceof TFile) {
@@ -907,11 +1036,11 @@ export class SyncEngine {
         await this.pushFile(updated);
       }
     } finally {
-      this.processing.delete(change.path);
+      this.processing.set(change.path, Date.now());
     }
   }
 
-  private async readLocalFileState(path: string): Promise<LocalFileState> {
+  private async readLocalFileState(path: string, includeBinaryContent = false): Promise<LocalFileState> {
     const existing = this.vault.getAbstractFileByPath(path);
     const isBinary = this.isBinaryPath(path);
     if (!(existing instanceof TFile)) {
@@ -923,16 +1052,16 @@ export class SyncEngine {
     }
 
     if (isBinary) {
-      const buffer = await this.vault.readBinary(existing);
       return {
         exists: true,
         isBinary,
-        content: this.arrayBufferToBase64(buffer),
+        content: includeBinaryContent ? arrayBufferToBase64(await this.readBoundedBinary(existing)) : "",
         mtime: existing.stat.mtime,
         ctime: existing.stat.ctime,
       };
     }
 
+    assertFileSize(existing.stat.size, path);
     const content = await this.vault.read(existing);
     return {
       exists: true,
@@ -944,14 +1073,15 @@ export class SyncEngine {
   }
 
   private async restoreSnapshotEntry(entry: SnapshotFileEntry): Promise<void> {
+    if (this.stopped || !this.isPathAllowed(entry.path)) return;
     const existing = this.vault.getAbstractFileByPath(entry.path);
     if (!entry.existed) {
       if (existing) {
-        this.processing.set(entry.path, Date.now());
+        this.processing.set(entry.path, Infinity);
         try {
           await this.vault.delete(existing);
         } finally {
-          this.processing.delete(entry.path);
+          this.processing.set(entry.path, Date.now());
         }
       }
       return;
@@ -967,11 +1097,11 @@ export class SyncEngine {
       type: "file",
     };
 
-    this.processing.set(entry.path, Date.now());
+    this.processing.set(entry.path, Infinity);
     try {
-      await this.serializer.docToFile(doc);
+      await this.serializer.docToFile(doc, undefined, () => !this.stopped && this.isPathAllowed(entry.path));
     } finally {
-      this.processing.delete(entry.path);
+      this.processing.set(entry.path, Date.now());
     }
   }
 
@@ -979,13 +1109,9 @@ export class SyncEngine {
     return /\.(png|jpg|jpeg|gif|bmp|ico|svg|webp|pdf|mp3|mp4|ogg|webm|wav|flac|zip|tar|gz|7z|rar|woff|woff2|ttf|otf|eot|doc|docx|xls|xlsx|ppt|pptx)$/i.test(path);
   }
 
-  private arrayBufferToBase64(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
+  private async readBoundedBinary(file: TFile): Promise<ArrayBuffer> {
+    assertFileSize(file.stat.size, file.path);
+    return this.vault.readBinary(file);
   }
 
   private async ensureParentDirectory(filePath: string): Promise<void> {
@@ -1001,30 +1127,20 @@ export class SyncEngine {
 
   private async persistChunks(chunkData?: string[], chunkIds?: string[]): Promise<void> {
     if (!chunkData || !chunkIds) return;
-
-    if (this.crypto) {
-      for (let i = 0; i < chunkData.length; i++) {
-        const { ciphertext, iv } = await this.crypto.encrypt(chunkData[i]);
-        await this.localDB.put({
-          _id: chunkIds[i],
-          type: "chunk",
-          data: ciphertext,
-          iv,
-        });
-      }
-      return;
-    }
-
     for (let i = 0; i < chunkData.length; i++) {
+      if (this.stopped) return;
       const chunkId = chunkIds[i];
       try {
         await this.localDB.get(chunkId);
-      } catch {
-        await this.localDB.put({
-          _id: chunkId,
-          type: "chunk",
-          data: chunkData[i],
-        });
+        continue; // Content-addressed chunks are immutable, including encrypted chunks.
+      } catch (error: any) {
+        if (error?.status !== 404) throw error;
+      }
+      const encrypted = this.crypto ? await this.crypto.encrypt(chunkData[i]) : null;
+      try {
+        await this.localDB.put({ _id: chunkId, type: "chunk", data: encrypted?.ciphertext ?? chunkData[i], ...(encrypted ? { iv: encrypted.iv } : {}) });
+      } catch (error: any) {
+        if (error?.status !== 409) throw error; // Another replication may have installed this same chunk.
       }
     }
   }

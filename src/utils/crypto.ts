@@ -1,3 +1,5 @@
+import { arrayBufferToBase64 } from "../sync/safety";
+
 /**
  * E2E Encryption using Web Crypto API (AES-256-GCM).
  * Content is encrypted client-side before being stored in CouchDB.
@@ -76,12 +78,7 @@ export class CryptoHelper {
   }
 
   private bufferToBase64(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
+    return arrayBufferToBase64(buffer);
   }
 
   private base64ToBuffer(base64: string): ArrayBuffer {

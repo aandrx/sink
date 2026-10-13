@@ -4,6 +4,10 @@ A minimal self-hosted sync plugin for [Obsidian](https://obsidian.md). Always-on
 
 Forked from the architecture of [obsidian-livesync](https://github.com/vrtmrz/obsidian-livesync), stripped to the essentials.
 
+## Next release: 0.2.14
+
+Includes sync stability safeguards and the editor-style side-by-side diff viewer. See [release notes](docs/releases/0.2.14.md). Grey-screen crash causality remains unconfirmed; use the [controlled test plan](docs/STABILITY.md) before enabling Sink in a live vault. Development checks require Node.js 22.22.2+ (Node 22 LTS recommended).
+
 ---
 
 ## Features
@@ -12,6 +16,7 @@ Forked from the architecture of [obsidian-livesync](https://github.com/vrtmrz/ob
 - **Self-hosted** — CouchDB on your own server via Docker, no third-party cloud
 - **End-to-end encryption** — AES-256-GCM with PBKDF2 key derivation (optional)
 - **Automatic conflict resolution** — 3-way merge via diff-match-patch, manual fallback
+- **Side-by-side diff viewer** — aligned local/remote lines, red/green and inline highlights, synchronized scrolling, collapsible context, and change navigation
 - **Mobile support** — works on iOS and Android via Obsidian mobile
 - **Setup URI** — share connection settings to new devices in one paste
 - **8 settings total** — no configuration sprawl
@@ -118,7 +123,7 @@ Hover the status bar item for a tooltip with details.
 | Encryption passphrase | — | AES-256-GCM passphrase; leave empty to disable |
 | Sync delay | `1000ms` | Debounce time after last edit before pushing |
 | Auto-resolve conflicts | `true` | 3-way merge; false = prompt manually |
-| Sync config folder | `true` | Sync `.obsidian/` folder across devices |
+| Sync config folder | `false` | Allow config-folder sync; workspace state, plugin-enable lists, and Sink itself are always excluded |
 
 ---
 
@@ -174,6 +179,8 @@ cp main.js manifest.json styles.css "/path/to/vault/.obsidian/plugins/sink/"
 ---
 
 ## Troubleshooting
+
+For suspected grey-screen crashes, keep Sink disabled in the live vault until a controlled test succeeds. See [docs/STABILITY.md](docs/STABILITY.md) for findings, safety limits, and a staged verification procedure. The new config default does **not** override an existing saved setting.
 
 | Problem | Fix |
 |---------|-----|

@@ -146,7 +146,7 @@ export class SinkSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Sync config folder")
-      .setDesc("Sync .obsidian/ folder (plugins, themes, snippets) between devices")
+      .setDesc("Allow config-folder sync. Keep off while diagnosing crashes. Workspace state, plugin-enable lists, and Sink itself are always excluded. Existing files on the server are not removed.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.syncConfigFolder)

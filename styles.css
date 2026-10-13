@@ -102,80 +102,180 @@
   max-width: 100%;
 }
 
-.sink-conflict-modal .sink-diff-split {
+/* Scoped to the viewer itself, not a particular modal's parent classes. */
+.sink-diff-view {
+  --sink-diff-line-height: 24px;
+  --sink-diff-removed: color-mix(in srgb, var(--color-red, #e5534b) 13%, var(--background-primary));
+  --sink-diff-added: color-mix(in srgb, var(--color-green, #57ab5a) 13%, var(--background-primary));
+  width: 100%;
+  min-width: 0;
+  margin: 12px 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--background-primary);
+}
+
+.sink-diff-view .sink-diff-toolbar {
   display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-small);
+}
+
+.sink-diff-view .sink-diff-summary,
+.sink-diff-view .sink-diff-controls {
+  display: flex;
+  align-items: center;
   gap: 10px;
-  max-height: 55vh;
-  overflow-x: hidden;
-  overflow-y: auto;
+}
+
+.sink-diff-view .sink-diff-count-removed { color: var(--text-error); }
+.sink-diff-view .sink-diff-count-added { color: var(--color-green); }
+.sink-diff-view .sink-diff-position { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.sink-diff-view .sink-diff-controls button { margin: 0; padding: 3px 8px; font-size: inherit; }
+
+.sink-diff-view .sink-diff-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0;
   width: 100%;
 }
 
-.sink-conflict-modal .sink-diff-pane {
-  flex: 1;
+.sink-diff-view .sink-diff-pane {
   min-width: 0;
-  max-width: calc(50% - 5px);
-  padding: 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-secondary);
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
-.sink-conflict-modal .sink-diff-pane h4 {
-  margin: 0 0 8px 0;
-}
+.sink-diff-view .sink-diff-left { border-right: 1px solid var(--background-modifier-border); }
 
-.sink-conflict-modal .sink-diff-row {
-  display: grid;
-  grid-template-columns: 3.5em 1fr;
+.sink-diff-view .sink-diff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  align-items: start;
-  font-family: var(--font-monospace);
-  font-size: var(--font-smaller);
-  white-space: pre-wrap;
-  padding: 2px 4px;
-  border-radius: 4px;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
 }
 
-.sink-conflict-modal .sink-diff-line-number {
-  text-align: right;
-  color: var(--text-muted);
+.sink-diff-view .sink-diff-header-label {
+  font-weight: var(--font-semibold);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sink-diff-view .sink-diff-header-detail { color: var(--text-faint); font-size: 0.85em; }
+
+.sink-diff-view .sink-diff-scroll {
+  height: min(55vh, 640px);
+  min-height: 160px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.sink-diff-view .sink-diff-scroll:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
+
+.sink-diff-view .sink-diff-lines {
+  position: relative;
+  min-width: 100%;
+  padding: 4px 0;
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller, 12px);
+  tab-size: 4;
+}
+
+.sink-diff-view .sink-diff-row {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  height: var(--sink-diff-line-height);
+  line-height: var(--sink-diff-line-height);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sink-diff-view .sink-diff-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 1.5em;
+  background: var(--background-secondary);
+  border-right: 1px solid var(--background-modifier-border);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
   user-select: none;
 }
 
-.sink-conflict-modal .sink-diff-line-text {
+.sink-diff-view .sink-diff-line-number { text-align: right; padding-right: 6px; }
+.sink-diff-view .sink-diff-line-marker { text-align: center; }
+
+.sink-diff-view .sink-diff-line-text {
   min-width: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  padding: 0 10px;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  color: var(--text-normal);
 }
 
-.sink-conflict-modal .sink-diff-equal {
-  background: transparent;
+.sink-diff-view .sink-diff-delete,
+.sink-diff-view .sink-diff-delete .sink-diff-gutter { background: var(--sink-diff-removed); }
+.sink-diff-view .sink-diff-insert,
+.sink-diff-view .sink-diff-insert .sink-diff-gutter { background: var(--sink-diff-added); }
+.sink-diff-view .sink-diff-delete .sink-diff-line-marker { color: var(--text-error); }
+.sink-diff-view .sink-diff-insert .sink-diff-line-marker { color: var(--color-green); }
+
+.sink-diff-view .sink-diff-spacer {
+  background: repeating-linear-gradient(-45deg, transparent, transparent 3px, var(--background-modifier-border) 3px, var(--background-modifier-border) 4px);
+  opacity: 0.45;
 }
 
-.sink-conflict-modal .sink-diff-insert {
-  background: color-mix(in srgb, var(--color-green) 14%, transparent);
+.sink-diff-view .sink-diff-word-change { border-radius: 2px; }
+.sink-diff-view .sink-diff-delete .sink-diff-word-change { background: color-mix(in srgb, var(--color-red) 28%, transparent); }
+.sink-diff-view .sink-diff-insert .sink-diff-word-change { background: color-mix(in srgb, var(--color-green) 28%, transparent); }
+.sink-diff-view .sink-diff-current-change { box-shadow: inset 0 0 0 1px var(--interactive-accent); }
+
+.sink-diff-view button.sink-diff-fold {
+  display: block;
+  width: 100%;
+  height: var(--sink-diff-line-height);
+  min-height: 0;
+  margin: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: inherit;
+  line-height: var(--sink-diff-line-height);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
-.sink-conflict-modal .sink-diff-delete {
-  background: color-mix(in srgb, var(--color-red) 14%, transparent);
-}
+.sink-diff-view button.sink-diff-fold:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 
-.sink-conflict-modal .sink-diff-change {
-  background: color-mix(in srgb, var(--color-yellow) 12%, transparent);
-}
-
-.sink-conflict-modal .sink-diff-left .sink-diff-delete .sink-diff-line-text,
-.sink-conflict-modal .sink-diff-left .sink-diff-change .sink-diff-line-text {
-  color: var(--text-error);
-}
-
-.sink-conflict-modal .sink-diff-right .sink-diff-insert .sink-diff-line-text,
-.sink-conflict-modal .sink-diff-right .sink-diff-change .sink-diff-line-text {
-  color: var(--color-green);
+@media (max-width: 600px) {
+  .sink-diff-view .sink-diff-header-detail { display: none; }
+  .sink-diff-view .sink-diff-toolbar { padding: 6px 8px; }
+  .sink-diff-view .sink-diff-controls { gap: 6px; flex-wrap: wrap; }
+  .sink-diff-view .sink-diff-row { grid-template-columns: 4em minmax(0, 1fr); }
 }
 
 /* --- Device List / Snapshots --- */

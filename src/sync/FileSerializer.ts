@@ -1,6 +1,7 @@
 import type { Vault, TFile } from "obsidian";
 import type { SinkDoc } from "../settings";
 import type { LocalDB } from "./LocalDB";
+import { arrayBufferToBase64, assertFileSize, MAX_CONTENT_LENGTH } from "./safety";
 
 const CHUNK_SIZE = 64 * 1024; // 64KB threshold
 
@@ -32,15 +33,18 @@ export class FileSerializer {
    * the caller (SyncEngine) can encrypt them before writing to localDB.
    */
   async fileToDoc(file: TFile): Promise<{ doc: SinkDoc; chunkData?: string[]; chunkIds?: string[] }> {
+    assertFileSize(file.stat.size, file.path);
     const isBinary = this.isBinaryFile(file.path);
     let content: string;
 
     if (isBinary) {
       const buffer = await this.vault.readBinary(file);
-      content = this.arrayBufferToBase64(buffer);
+      assertFileSize(buffer.byteLength, file.path);
+      content = arrayBufferToBase64(buffer);
     } else {
       content = await this.vault.read(file);
     }
+    if (content.length > MAX_CONTENT_LENGTH) throw new Error(`Content exceeds safety limit: ${file.path}`);
 
     const doc: SinkDoc = {
       _id: this.localDB.pathToId(file.path),
@@ -73,7 +77,8 @@ export class FileSerializer {
   }
 
   /** Convert a SinkDoc back to file content and write to vault */
-  async docToFile(doc: SinkDoc, chunkDecrypt?: ChunkDecryptFn): Promise<void> {
+  async docToFile(doc: SinkDoc, chunkDecrypt?: ChunkDecryptFn, canWrite: () => boolean = () => true): Promise<void> {
+    if (!canWrite()) return;
     if (doc.deleted) {
       const existing = this.vault.getAbstractFileByPath(doc.path);
       if (existing) {
@@ -82,37 +87,13 @@ export class FileSerializer {
       return;
     }
 
-    let content: string;
-
-    // Reassemble from chunks if needed
-    if (doc.chunks && doc.chunks.length > 0) {
-      const chunkContents: string[] = [];
-
-      // Decrypt chunk-by-chunk when an IV is present; keep plaintext chunks as-is.
-      const doDecrypt = chunkDecrypt ?? null;
-
-      for (const chunkId of doc.chunks) {
-        const chunk = await this.localDB.get(chunkId) as any;
-        if (doDecrypt && typeof chunk.iv === "string" && chunk.iv.length > 0) {
-          try {
-            chunkContents.push(await doDecrypt(chunk.data, chunk.iv));
-            continue;
-          } catch {
-            // Fall back to raw data for legacy/plaintext chunks.
-          }
-        }
-
-        chunkContents.push(chunk.data);
-      }
-      content = chunkContents.join("");
-    } else {
-      content = doc.content;
-    }
-
+    const content = await this.readDocContent(doc, chunkDecrypt);
+    if (!canWrite()) return;
     const isBinary = this.isBinaryFile(doc.path);
 
     // Ensure parent directories exist
     await this.ensureDirectory(doc.path);
+    if (!canWrite()) return;
 
     const existing = this.vault.getAbstractFileByPath(doc.path);
     if (isBinary) {
@@ -129,6 +110,45 @@ export class FileSerializer {
         await this.vault.create(doc.path, content);
       }
     }
+  }
+
+  /** Reconstruct before comparing/merging; missing or corrupt chunks must not overwrite files. */
+  async readDocContent(doc: SinkDoc, chunkDecrypt?: ChunkDecryptFn): Promise<string> {
+    assertFileSize(doc.size, doc.path);
+    let content: string;
+
+    // Reassemble from chunks if needed
+    if (doc.chunks && doc.chunks.length > 0) {
+      if (doc.chunks.length > Math.ceil(MAX_CONTENT_LENGTH / CHUNK_SIZE)) {
+        throw new Error(`Too many chunks for ${doc.path}`);
+      }
+      const chunkContents: string[] = [];
+      let length = 0;
+
+      // Decrypt chunk-by-chunk when an IV is present; keep plaintext chunks as-is.
+      const doDecrypt = chunkDecrypt ?? null;
+
+      for (const chunkId of doc.chunks) {
+        const chunk = await this.localDB.get(chunkId) as any;
+        if (typeof chunk.data !== "string" || chunk.data.length > CHUNK_SIZE * 8) throw new Error(`Invalid or oversized chunk for ${doc.path}`);
+        let data = chunk.data;
+        if (typeof chunk.iv === "string" && chunk.iv.length > 0) {
+          if (!doDecrypt) throw new Error(`Encrypted chunk requires a passphrase: ${doc.path}`);
+          data = await doDecrypt(chunk.data, chunk.iv);
+        }
+        length += data.length;
+        if (length > MAX_CONTENT_LENGTH) throw new Error(`Content exceeds safety limit: ${doc.path}`);
+        chunkContents.push(data);
+      }
+      content = chunkContents.join("");
+    } else {
+      content = doc.content;
+    }
+
+    if (typeof content !== "string" || content.length > MAX_CONTENT_LENGTH) {
+      throw new Error(`Invalid or oversized content: ${doc.path}`);
+    }
+    return content;
   }
 
   /** Check if the file has changed compared to the stored doc */
@@ -179,15 +199,6 @@ export class FileSerializer {
     const hashBuffer = await crypto.subtle.digest("SHA-256", data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-  }
-
-  private arrayBufferToBase64(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
   }
 
   private base64ToArrayBuffer(base64: string): ArrayBuffer {

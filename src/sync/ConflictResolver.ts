@@ -15,7 +15,7 @@ export interface MergeResult {
  * Falls back to "newer wins" for binary or failed merges.
  */
 export class ConflictResolver {
-  private dmp: diff_match_patch;
+  private dmp: InstanceType<typeof diff_match_patch>;
 
   constructor() {
     this.dmp = new diff_match_patch();
@@ -67,6 +67,8 @@ export class ConflictResolver {
    * Returns merged content or null if merge has conflicts.
    */
   private attemptTextMerge(mineText: string, theirsText: string): string | null {
+    // Diffing happens on Obsidian's UI thread. Large notes require an explicit choice.
+    if (mineText.length + theirsText.length > 1024 * 1024) return null;
     try {
       // Use diff-match-patch to compute patches from theirs against mine
       const diffs = this.dmp.diff_main(mineText, theirsText);

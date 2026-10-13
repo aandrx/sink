@@ -21,6 +21,8 @@ export class Replicator {
   private retryDelay = 3000;
   private maxRetryDelay = 30000;
   private active = false;
+  private generation = 0;
+  private oneShots = new Set<PouchDB.Replication.Replication<any>>();
 
   constructor(localDB: LocalDB, remoteDB: RemoteDB, handler: ReplicatorEventHandler) {
     this.localDB = localDB;
@@ -32,10 +34,14 @@ export class Replicator {
   start(): void {
     if (this.active) return;
     this.active = true;
-    this.retryDelay = 3000;
+    const generation = ++this.generation;
+    const emit: ReplicatorEventHandler = (event) => {
+      if (this.active && generation === this.generation) this.handler(event);
+    };
 
     const remote = this.remoteDB.instance;
     if (!remote) {
+      this.active = false;
       this.handler({ type: "error", error: "Remote DB not connected" });
       return;
     }
@@ -46,24 +52,25 @@ export class Replicator {
     this.pushReplication = local.replicate.to(remote, {
       live: true,
       retry: true,
-      batch_size: 50,
-      batches_limit: 5,
+      batch_size: 10,
+      batches_limit: 1,
     }) as unknown as PouchDB.Replication.Replication<any>;
 
     this.pushReplication.on("change", (info: any) => {
-      this.handler({ type: "change", docs: info.docs || [] });
-      this.handler({ type: "status", status: "syncing" });
+      // Push confirmations are not incoming remote edits.
+      emit({ type: "status", status: "syncing" });
     });
     this.pushReplication.on("paused", () => {
-      this.handler({ type: "paused" });
-      this.handler({ type: "status", status: "connected" });
+      emit({ type: "paused" });
+      emit({ type: "status", status: "connected" });
     });
     this.pushReplication.on("active", () => {
-      this.handler({ type: "active" });
-      this.handler({ type: "status", status: "syncing" });
+      emit({ type: "active" });
+      emit({ type: "status", status: "syncing" });
     });
     this.pushReplication.on("error", (err: any) => {
-      this.handler({ type: "error", error: err });
+      if (!this.active || generation !== this.generation) return;
+      emit({ type: "error", error: err });
       if (this.isAuthError(err)) {
         this.stop();
       } else {
@@ -75,24 +82,25 @@ export class Replicator {
     this.pullReplication = local.replicate.from(remote, {
       live: true,
       retry: true,
-      batch_size: 50,
-      batches_limit: 5,
+      batch_size: 10,
+      batches_limit: 1,
     }) as unknown as PouchDB.Replication.Replication<any>;
 
     this.pullReplication.on("change", (info: any) => {
-      this.handler({ type: "change", docs: info.docs || [] });
-      this.handler({ type: "status", status: "syncing" });
+      emit({ type: "change", docs: info.docs || [] });
+      emit({ type: "status", status: "syncing" });
     });
     this.pullReplication.on("paused", () => {
-      this.handler({ type: "paused" });
-      this.handler({ type: "status", status: "connected" });
+      emit({ type: "paused" });
+      emit({ type: "status", status: "connected" });
     });
     this.pullReplication.on("active", () => {
-      this.handler({ type: "active" });
-      this.handler({ type: "status", status: "syncing" });
+      emit({ type: "active" });
+      emit({ type: "status", status: "syncing" });
     });
     this.pullReplication.on("error", (err: any) => {
-      this.handler({ type: "error", error: err });
+      if (!this.active || generation !== this.generation) return;
+      emit({ type: "error", error: err });
       if (this.isAuthError(err)) {
         this.stop();
       } else {
@@ -106,6 +114,9 @@ export class Replicator {
   /** Stop replication */
   stop(): void {
     this.active = false;
+    this.generation++;
+    for (const replication of this.oneShots) replication.cancel();
+    this.oneShots.clear();
     if (this.pushReplication) {
       this.pushReplication.cancel();
       this.pushReplication = null;
@@ -129,6 +140,8 @@ export class Replicator {
   /** Handle disconnect with exponential backoff retry */
   private handleDisconnect(): void {
     if (!this.active) return;
+    this.generation++;
+    if (this.retryTimeout) clearTimeout(this.retryTimeout);
 
     this.handler({ type: "status", status: "error" });
 
@@ -144,6 +157,7 @@ export class Replicator {
 
     // Retry with exponential backoff
     this.retryTimeout = setTimeout(() => {
+      this.retryTimeout = null;
       if (this.active) {
         this.active = false; // Reset so start() works
         this.start();
@@ -158,7 +172,7 @@ export class Replicator {
     const remote = this.remoteDB.instance;
     if (!remote) throw new Error("Remote DB not connected");
     const local = this.localDB.instance;
-    await local.replicate.to(remote);
+    await this.trackOneShot(local.replicate.to(remote, { batch_size: 10, batches_limit: 1 }) as unknown as PouchDB.Replication.Replication<any>);
   }
 
   /** Perform a one-shot pull (remote → local) */
@@ -166,7 +180,16 @@ export class Replicator {
     const remote = this.remoteDB.instance;
     if (!remote) throw new Error("Remote DB not connected");
     const local = this.localDB.instance;
-    await local.replicate.from(remote);
+    await this.trackOneShot(local.replicate.from(remote, { batch_size: 10, batches_limit: 1 }) as unknown as PouchDB.Replication.Replication<any>);
+  }
+
+  private async trackOneShot(replication: PouchDB.Replication.Replication<any>): Promise<void> {
+    this.oneShots.add(replication);
+    try {
+      await replication;
+    } finally {
+      this.oneShots.delete(replication);
+    }
   }
 
   get isActive(): boolean {

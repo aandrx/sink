@@ -162,10 +162,11 @@ export class BatchReviewModal extends Modal {
 			popup.modalEl.addClass("mod-sink-wide");
 			const { contentEl } = popup;
 			contentEl.empty();
+			contentEl.addClass("sink-conflict-modal");
 			contentEl.createEl("h3", { text: change.path });
 			contentEl.createEl("p", { text: `Source device: ${change.sourceDevice}` });
 			contentEl.createEl("p", {
-				text: "Split diff view. Green lines are additions, red lines are removals or replacements.",
+				text: "Local is on the left, remote on the right. Red marks removals, green marks additions. Use the arrows to jump between changes.",
 				cls: "setting-item-description",
 			});
 
@@ -179,6 +180,7 @@ export class BatchReviewModal extends Modal {
 
 			renderSplitDiff(contentEl, "Local", "Remote", change.localContent ?? "", change.remoteContent ?? "");
 		};
+		popup.onClose = () => popup.contentEl.empty();
 		popup.open();
 	}
 

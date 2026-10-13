@@ -1,5 +1,5 @@
 import { PouchDB } from "./pouchdb";
-import type { DeviceMetaDoc, SinkDoc, SinkStoredDoc, SnapshotMetaDoc } from "../settings";
+import type { DeviceMetaDoc, SinkDoc, SinkStoredDoc, SnapshotMetaDoc, SnapshotSummary } from "../settings";
 
 export class LocalDB {
   private db: PouchDB.Database<SinkStoredDoc>;
@@ -30,7 +30,7 @@ export class LocalDB {
     return await this.db.remove(doc);
   }
 
-  async allDocs(options?: PouchDB.Core.AllDocsOptions): Promise<PouchDB.Core.AllDocsResponse<SinkStoredDoc>> {
+  async allDocs(options?: PouchDB.Core.AllDocsOptions | PouchDB.Core.AllDocsWithinRangeOptions): Promise<PouchDB.Core.AllDocsResponse<SinkStoredDoc>> {
     return await this.db.allDocs({ include_docs: true, ...options });
   }
 
@@ -48,6 +48,10 @@ export class LocalDB {
     await this.db.destroy();
   }
 
+  async close(): Promise<void> {
+    await this.db.close();
+  }
+
   async getDeviceDoc(deviceId: string): Promise<(DeviceMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta) | null> {
     try {
       const doc = await this.db.get(this.deviceMetaId(deviceId));
@@ -62,7 +66,7 @@ export class LocalDB {
   }
 
   async getAllDeviceDocs(): Promise<Array<DeviceMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta>> {
-    const result = await this.db.allDocs({ include_docs: true });
+    const result = await this.db.allDocs({ include_docs: true, startkey: "meta:device:", endkey: "meta:device:\uffff" });
     type DeviceDoc = DeviceMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta;
     return result.rows
       .map((row: { doc?: SinkStoredDoc }) => row.doc)
@@ -88,17 +92,23 @@ export class LocalDB {
     }
   }
 
-  async getSnapshotDocs(limit = 20): Promise<Array<SnapshotMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta>> {
-    const result = await this.db.allDocs({ include_docs: true });
-    type SnapshotDoc = SnapshotMetaDoc & PouchDB.Core.IdMeta & PouchDB.Core.GetMeta;
-    const snapshots = result.rows
-      .map((row: { doc?: SinkStoredDoc }) => row.doc)
-      .filter((doc: SinkStoredDoc | undefined): doc is SnapshotDoc => {
-        return !!doc && doc.type === "meta" && (doc as SnapshotMetaDoc).metaType === "snapshot";
-      })
-      .sort((left: SnapshotDoc, right: SnapshotDoc) => right.createdAt - left.createdAt);
-
-    return snapshots.slice(0, limit);
+  async getSnapshotSummaries(limit = 20): Promise<SnapshotSummary[]> {
+    // Snapshot IDs are time-prefixed. Fetch only the newest requested documents.
+    const result = await this.db.allDocs({
+      include_docs: false,
+      descending: true,
+      startkey: "meta:snapshot:\uffff",
+      endkey: "meta:snapshot:",
+      limit,
+    });
+    const summaries: SnapshotSummary[] = [];
+    // Legacy snapshots embed content. Read one at a time and retain only metadata.
+    for (const row of result.rows) {
+      const doc = await this.getSnapshotDoc(row.id.slice("meta:snapshot:".length));
+      if (!doc) continue;
+      summaries.push({ id: row.id.slice("meta:snapshot:".length), createdAt: doc.createdAt, reason: doc.reason, fileCount: doc.files.length });
+    }
+    return summaries;
   }
 
   async info(): Promise<PouchDB.Core.DatabaseInfo> {

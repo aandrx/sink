@@ -36,7 +36,7 @@ export const DEFAULT_SETTINGS: SinkSettings = {
   deviceName: "",
   deviceId: "",
   isConfigured: false,
-  syncConfigFolder: true,
+  syncConfigFolder: false,
   lastSeenVersion: "",
 };
 

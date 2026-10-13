@@ -1,4 +1,4 @@
-import { Plugin, Notice, TFile, type TAbstractFile } from "obsidian";
+import { Plugin, Notice, TFile } from "obsidian";
 import { SyncEngine } from "./sync/SyncEngine";
 import { SinkSettingsTab } from "./ui/SettingsTab";
 import { StatusBar, RibbonIcon } from "./ui/StatusBar";
@@ -15,6 +15,14 @@ export default class SinkPlugin extends Plugin {
   private statusBar: StatusBar | null = null;
   private ribbonIcon: RibbonIcon | null = null;
   private floatingStatus: FloatingStatus | null = null;
+  private unloaded = false;
+  private lifecycleQueue: Promise<void> = Promise.resolve();
+
+  private queueLifecycle(operation: () => Promise<void>): Promise<void> {
+    const result = this.lifecycleQueue.then(operation);
+    this.lifecycleQueue = result.catch((error) => console.error("Sink lifecycle error:", error));
+    return result;
+  }
 
   async onload() {
     await this.loadSettings();
@@ -22,6 +30,19 @@ export default class SinkPlugin extends Plugin {
 
     // Add settings tab
     this.addSettingTab(new SinkSettingsTab(this.app, this));
+
+    // Register once per plugin load, not once per connection restart.
+    const runFileEvent = (operation: Promise<void> | undefined) => {
+      void operation?.catch((error) => console.error("Sink file event failed:", error));
+    };
+    this.registerEvent(this.app.vault.on("modify", (file) => {
+      if (file instanceof TFile) runFileEvent(this.syncEngine?.onFileChange(file));
+    }));
+    this.registerEvent(this.app.vault.on("create", (file) => {
+      if (file instanceof TFile) runFileEvent(this.syncEngine?.onFileChange(file));
+    }));
+    this.registerEvent(this.app.vault.on("delete", (file) => runFileEvent(this.syncEngine?.onFileDelete(file))));
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => runFileEvent(this.syncEngine?.onFileRename(file, oldPath))));
 
     // Add status bar
     this.statusBar = new StatusBar(this.addStatusBarItem());
@@ -48,7 +69,7 @@ export default class SinkPlugin extends Plugin {
       const payload = parseSetupURI(uri);
       if (payload) {
         this.settings = applySetupPayload(this.settings, payload);
-        this.saveSettings();
+        void this.saveSettings().catch((error) => console.error("Sink settings import failed:", error));
         new Notice("Sink: Settings imported from setup URI!");
         // Show setup wizard to complete (choose push/pull/merge)
         new SetupWizard(this.app, this, "imported").open();
@@ -59,16 +80,21 @@ export default class SinkPlugin extends Plugin {
 
     // Floating status overlay — inject once workspace is ready
     this.app.workspace.onLayoutReady(() => {
+      if (this.unloaded) return;
       const workspaceEl = this.app.workspace.containerEl;
       this.floatingStatus = new FloatingStatus(workspaceEl);
     });
 
     // If configured, start syncing
     if (this.settings.isConfigured) {
-      await this.startSync();
+      // Do not mutate vault/config files while Obsidian is still initializing.
+      this.app.workspace.onLayoutReady(() => {
+        if (!this.unloaded) void this.startSync().catch((error) => console.error("Sink startup failed:", error));
+      });
     } else {
       // Show setup wizard on first run
       this.app.workspace.onLayoutReady(() => {
+        if (this.unloaded) return;
         new SetupWizard(this.app, this, "fresh").open();
       });
     }
@@ -101,14 +127,25 @@ export default class SinkPlugin extends Plugin {
   }
 
   async onunload() {
+    this.unloaded = true;
+    // Cancel immediately, even if a start/restart is still awaiting IndexedDB.
+    void this.syncEngine?.stop().catch((error) => console.error("Sink unload cancellation failed:", error));
     this.floatingStatus?.destroy();
+    this.floatingStatus = null;
     await this.stopSync();
   }
 
   /** Start the sync engine and register vault event listeners */
   async startSync(): Promise<void> {
+    return this.queueLifecycle(() => this.startSyncInternal());
+  }
+
+  private async startSyncInternal(): Promise<void> {
+    if (this.unloaded) return;
     if (this.syncEngine) {
-      await this.syncEngine.stop();
+      const previous = this.syncEngine;
+      this.syncEngine = null;
+      await previous.shutdown();
     }
 
     // Default device name to a generated one
@@ -122,8 +159,11 @@ export default class SinkPlugin extends Plugin {
       this.settings,
       this.app.vault.getName(),
       this.manifest.version,
-      (event) => this.handleSyncEvent(event)
+      (event) => {
+        if (!this.unloaded && this.syncEngine === engine) this.handleSyncEvent(event);
+      }
     );
+    const engine = this.syncEngine;
 
     try {
       const identityChanged = await this.syncEngine.initializeDeviceIdentity();
@@ -131,39 +171,18 @@ export default class SinkPlugin extends Plugin {
         await this.saveSettings();
       }
 
+      if (this.unloaded) {
+        this.syncEngine = null;
+        await engine.shutdown();
+        return;
+      }
+
       await this.syncEngine.start();
       await this.refreshRibbonState();
-      this.statusBar?.setStatus("connected");
-
-      // Register vault events
-      this.registerEvent(
-        this.app.vault.on("modify", (file: TAbstractFile) => {
-          if (file instanceof TFile) {
-            this.syncEngine?.onFileChange(file);
-          }
-        })
-      );
-
-      this.registerEvent(
-        this.app.vault.on("create", (file: TAbstractFile) => {
-          if (file instanceof TFile) {
-            this.syncEngine?.onFileChange(file);
-          }
-        })
-      );
-
-      this.registerEvent(
-        this.app.vault.on("delete", (file: TAbstractFile) => {
-          this.syncEngine?.onFileDelete(file);
-        })
-      );
-
-      this.registerEvent(
-        this.app.vault.on("rename", (file: TAbstractFile, oldPath: string) => {
-          this.syncEngine?.onFileRename(file, oldPath);
-        })
-      );
+      if (!this.unloaded) this.statusBar?.setStatus("connected");
     } catch (e: any) {
+      this.syncEngine = null;
+      await engine.shutdown().catch((error) => console.error("Sink startup cleanup failed:", error));
       this.statusBar?.setStatus("error");
       new Notice(`Sink: Failed to start — ${e.message}`);
     }
@@ -171,9 +190,14 @@ export default class SinkPlugin extends Plugin {
 
   /** Stop the sync engine */
   async stopSync(): Promise<void> {
+    return this.queueLifecycle(() => this.stopSyncInternal());
+  }
+
+  private async stopSyncInternal(): Promise<void> {
     if (this.syncEngine) {
-      await this.syncEngine.stop();
+      const engine = this.syncEngine;
       this.syncEngine = null;
+      await engine.shutdown();
     }
     this.statusBar?.setStatus("disconnected");
   }
@@ -183,7 +207,7 @@ export default class SinkPlugin extends Plugin {
     switch (event.type) {
       case "status-change":
         this.statusBar?.setStatus(event.status as SyncStatus);
-        void this.refreshRibbonState(event.status as SyncStatus);
+        void this.refreshRibbonState(event.status as SyncStatus).catch((error) => console.error("Sink status refresh failed:", error));
         this.floatingStatus?.setStatus(event.status as SyncStatus);
         break;
       case "doc-pushed":
@@ -218,6 +242,7 @@ export default class SinkPlugin extends Plugin {
     }
 
     const [role, headState] = await Promise.all([engine.getCurrentDeviceRole(), Promise.resolve(engine.getSyncHeadState())]);
+    if (this.unloaded || this.syncEngine !== engine) return;
     this.ribbonIcon.update(status ?? engine.getStatus(), role, headState);
   }
 
@@ -246,6 +271,7 @@ export default class SinkPlugin extends Plugin {
     await this.saveData(this.settings);
 
     this.app.workspace.onLayoutReady(() => {
+      if (this.unloaded) return;
       new UpdateNotesModal(this.app, previousVersion, currentVersion).open();
     });
   }
