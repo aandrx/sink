@@ -8,6 +8,15 @@ interface ReleaseNote {
 
 const LATEST_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.2.16",
+    title: "IndexedDB Lifecycle Fix",
+    points: [
+      "Fixed the database connection closing error when Sink reloads or restarts during startup.",
+      "Shutdown now waits for an in-progress start, and only the newest plugin instance closes the shared IndexedDB connection.",
+      "0.2.15 features are unchanged: complete reviews, Local/Remote conflict resolution, startup reconciliation, and encrypted local snapshots.",
+    ],
+  },
+  {
     version: "0.2.15",
     title: "Safer Sync and Complete Reviews",
     points: [

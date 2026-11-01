@@ -104,6 +104,7 @@ export class SyncEngine {
   private sessionMergeAllowed = false;
   private remoteHeadState: "head" | "behind" = "head";
   private stopped = false;
+  private startPromise: Promise<void> | null = null;
   private operationQueue: Promise<unknown> = Promise.resolve();
   private pendingIncoming = new Set<string>();
   private deferredIncoming = new Set<string>();
@@ -232,8 +233,19 @@ export class SyncEngine {
     this.serializer = new FileSerializer(vault, this.localDB);
   }
 
-  /** Initialize and start syncing */
+  /** Initialize and start syncing. Shutdown waits for this before releasing IndexedDB. */
   async start(): Promise<void> {
+    if (this.startPromise) return await this.startPromise;
+    const run = this.startInternal();
+    this.startPromise = run;
+    try {
+      await run;
+    } finally {
+      if (this.startPromise === run) this.startPromise = null;
+    }
+  }
+
+  private async startInternal(): Promise<void> {
     this.stopped = false;
     // Initialize encryption if passphrase is set
     if (this.settings.passphrase) {
@@ -458,6 +470,7 @@ export class SyncEngine {
   /** Plugin replacements must also release the IndexedDB connection. */
   async shutdown(): Promise<void> {
     await this.stop();
+    await this.startPromise?.catch(() => undefined);
     await this.operationQueue;
     await this.localDB.close();
   }

@@ -27,15 +27,21 @@ export class LocalDB {
   private static readonly SNAPSHOT_INDEX_ID = "_local/sink-snapshot-index";
   private static readonly SNAPSHOT_INDEX_LIMIT = 50;
   private static readonly SNAPSHOT_INDEX_ATTEMPTS = 3;
+  private static readonly latestGeneration = new Map<string, number>();
+  private static nextGeneration = 0;
 
   private db: PouchDB.Database<SinkStoredDoc>;
   private dbName: string;
   private snapshotCrypto: CryptoHelper | null = null;
   private snapshotIndexQueue: Promise<void> = Promise.resolve();
+  private closed = false;
+  private generation: number;
 
   constructor(vaultName: string) {
     this.dbName = `sink-${vaultName.replace(/[^a-zA-Z0-9]/g, "_")}`;
     this.db = new PouchDB(this.dbName, { adapter: "idb" });
+    this.generation = ++LocalDB.nextGeneration;
+    LocalDB.latestGeneration.set(this.dbName, this.generation);
   }
 
   get instance(): PouchDB.Database<SinkStoredDoc> {
@@ -73,10 +79,20 @@ export class LocalDB {
   }
 
   async destroy(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    LocalDB.latestGeneration.delete(this.dbName);
     await this.db.destroy();
   }
 
   async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    // PouchDB caches one IDB connection per database name. If a replacement
+    // plugin instance has opened it already, closing here would interrupt the
+    // replacement's transactions. Only the newest instance owns the close.
+    if (LocalDB.latestGeneration.get(this.dbName) !== this.generation) return;
+    LocalDB.latestGeneration.delete(this.dbName);
     await this.db.close();
   }
 

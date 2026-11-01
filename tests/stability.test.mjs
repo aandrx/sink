@@ -391,6 +391,41 @@ test("shutdown cancels an open review and closes the database without applying",
   } finally { BatchReviewModal.prototype.onOpen = previous; }
 });
 
+test("shutdown waits for a pending startup before closing IndexedDB", async () => {
+  const { engine, db } = fixture();
+  const entered = gate();
+  const release = gate();
+  const original = Replicator.prototype.pullOnce;
+  Replicator.prototype.pullOnce = async () => {
+    entered.resolve();
+    await release.promise;
+  };
+  try {
+    const starting = engine.start();
+    await entered.promise;
+    const stopping = engine.shutdown();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(db.closed, undefined);
+    release.resolve();
+    await starting;
+    await stopping;
+    assert.equal(db.closed, true);
+  } finally {
+    Replicator.prototype.pullOnce = original;
+  }
+});
+
+test("one LocalDB connection closing does not close a replacement connection", async () => {
+  const first = new LocalDB("shared-reopen");
+  const second = new LocalDB("shared-reopen");
+  await first.close();
+  assert.equal(first.instance.closed, undefined);
+  await second.put({ _id: "file:kept.md", path: "kept.md", content: "kept", mtime: 1, ctime: 1, size: 4, type: "file" });
+  assert.equal(second.instance.closed, undefined);
+  await second.close();
+  assert.equal(second.instance.closed, true);
+});
+
 test("serializer rechecks cancellation after awaiting chunk retrieval", async () => {
   const { engine, vault, db } = fixture();
   const entered = gate(); const first = gate();
