@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
-      - "v[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   contents: write
@@ -30,7 +29,8 @@ jobs:
             const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
             const manifest = JSON.parse(fs.readFileSync("manifest.json", "utf8"));
             const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
-            const version = process.env.GITHUB_REF_NAME.replace(/^v/, "");
+            const version = process.env.GITHUB_REF_NAME;
+            if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("Use an unprefixed release tag, for example 0.2.15");
             if ([pkg.version, manifest.version, lock.version, lock.packages[""].version].some(value => value !== version)) {
               throw new Error("Release tag and package/manifest/lock versions must match");
             }
@@ -48,7 +48,7 @@ jobs:
 
       - name: Locate release notes
         id: notes
-        run: echo "path=docs/releases/${GITHUB_REF_NAME#v}.md" >> "$GITHUB_OUTPUT"
+        run: echo "path=docs/releases/${GITHUB_REF_NAME}.md" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

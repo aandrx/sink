@@ -1,5 +1,9 @@
 # Sink — Obsidian LiveSync Plugin (Simplified Fork)
 
+## Current implementation status
+
+This is the original design document, not a statement of release readiness. The 0.2.15 development scope is documented in [release notes](releases/0.2.15.md), with actual checks and remaining rollout gates in [verification evidence](verification/0.2.15.md). In particular, divergent edits require explicit side selection rather than the originally planned automatic three-way merge. New safety snapshots are local-only; legacy plaintext snapshot exposure requires separate remediation.
+
 ## Overview
 
 **Sink** is a simplified, reliability-focused Obsidian sync plugin built on CouchDB. It strips away the complexity of obsidian-livesync while keeping the core functionality: real-time bidirectional sync between all your devices via a self-hosted CouchDB instance on your home server, accessed through Tailscale.

@@ -82,7 +82,12 @@
 
 /* --- Ribbon Icon --- */
 .sink-ribbon-connected svg    { color: var(--color-green) !important; stroke: var(--color-green) !important; }
-.sink-ribbon-syncing svg      { color: var(--color-blue) !important;  stroke: var(--color-blue) !important; animation: sink-spin 1s linear infinite; }
+.sink-ribbon-syncing svg      { color: var(--color-blue) !important;  stroke: var(--color-blue) !important; }
+.sink-ribbon-paused svg       { color: var(--text-warning) !important; stroke: var(--text-warning) !important; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .sink-ribbon-syncing svg { animation: sink-spin 1s linear infinite; }
+}
 .sink-ribbon-error svg        { color: var(--text-error) !important;  stroke: var(--text-error) !important; }
 .sink-ribbon-disconnected svg { opacity: 0.35; }
 
@@ -410,36 +415,439 @@
   line-height: 1.35;
 }
 
-/* --- Batch Review Polish --- */
-.sink-batch-summary {
-  margin-top: -4px;
-  margin-bottom: 8px;
+/* --- Batch Review Workspace --- */
+.sink-review-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  height: min(84dvh, 900px);
+  max-height: calc(100dvh - 180px);
 }
 
-.sink-batch-list {
-  max-height: min(55vh, 620px);
+.sink-review-header h2 {
+  margin: 0 0 4px 0;
+}
+
+.sink-review-header h2:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.sink-review-header p {
+  margin: 0 0 8px 0;
+}
+
+.sink-review-selection-count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sink-review-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sink-review-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sink-review-toolbar button {
+  margin: 0;
+  padding: 3px 8px;
+  font-size: var(--font-ui-small);
+}
+
+.sink-review-bulk-label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.sink-review-bulk-select,
+.sink-review-decision {
+  font-size: var(--font-ui-small);
+}
+
+.sink-review-body {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.6fr);
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.sink-review-files {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sink-review-section-title {
+  margin: 0 0 6px 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sink-review-file-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding-right: 4px;
 }
 
-.sink-batch-row {
+.sink-review-file-row {
+  display: grid;
+  cursor: pointer;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  padding: 6px 8px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  margin-bottom: 8px;
+  border-radius: 6px;
   background: var(--background-primary);
 }
 
-.sink-batch-row .setting-item {
-  border: 0;
-  margin-bottom: 0;
-  background: transparent;
+.sink-review-file-row.is-active {
+  border-color: var(--interactive-accent);
+  box-shadow: inset 3px 0 0 var(--interactive-accent);
 }
 
-.sink-batch-row .setting-item-name,
-.sink-batch-row .setting-item-description {
+.sink-review-file-select {
+  margin-top: 4px;
+}
+
+.sink-review-file-main {
+  min-width: 0;
+}
+
+.sink-review-file-path {
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  line-height: 1.35;
+  text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;
-  word-break: break-word;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .sink-review-file-path:hover {
+    color: var(--text-accent);
+    text-decoration: underline;
+  }
+}
+
+.sink-review-file-meta {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.sink-review-decision {
+  max-width: 12em;
+}
+
+.sink-review-pager {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.sink-review-pager button {
+  margin: 0;
+  padding: 3px 8px;
+  font-size: var(--font-ui-small);
+}
+
+.sink-review-pager button:disabled,
+.sink-review-footer-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sink-review-page-status {
+  flex: 1;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.sink-review-preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sink-review-preview-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding-right: 2px;
+}
+
+.sink-review-preview-header,
+.sink-review-consequence {
+  flex: 0 0 auto;
+}
+
+.sink-review-preview-header h3 {
+  margin: 0 0 2px 0;
+  font-size: var(--font-ui-medium);
+  overflow-wrap: anywhere;
+}
+
+.sink-review-preview-header h3:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.sink-review-preview-header p {
+  margin: 0 0 6px 0;
+}
+
+.sink-review-consequence {
+  margin: 0 0 8px 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--interactive-accent);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-secondary));
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: 1.35;
+}
+
+.sink-review-preview-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sink-review-preview-body .sink-diff-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 0;
+}
+
+.sink-review-preview-body .sink-diff-toolbar,
+.sink-review-preview-body .sink-diff-header {
+  flex: 0 0 auto;
+}
+
+.sink-review-preview-body .sink-diff-split {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sink-review-preview-body .sink-diff-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sink-review-preview-body .sink-diff-scroll {
+  flex: 1 1 auto;
+  height: auto;
+  max-height: none;
+}
+
+.sink-review-notice {
+  margin: 0 0 8px 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
+}
+
+.sink-review-error {
+  color: var(--text-error);
+  background: var(--background-modifier-error);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.sink-review-conflict-controls,
+.sink-conflict-revisions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px 0;
+}
+
+.sink-review-conflict-label,
+.sink-conflict-revision-label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.sink-review-revision-select,
+.sink-conflict-revision-select {
+  flex: 1 1 18em;
+  max-width: 100%;
+  font-size: var(--font-ui-small);
+}
+
+.sink-review-conflict-content,
+.sink-conflict-preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sink-review-retry {
+  margin-top: 4px;
+}
+
+.sink-review-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.sink-review-footer-note {
+  margin: 0;
+  max-width: 60ch;
+}
+
+.sink-review-footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sink-review-footer-actions button {
+  margin: 0;
+}
+
+.sink-review-workspace button:focus-visible,
+.sink-review-workspace select:focus-visible,
+.sink-review-workspace input:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+/* --- Single Conflict Modal --- */
+.sink-conflict-path {
+  font-family: var(--font-monospace);
+  overflow-wrap: anywhere;
+}
+
+.sink-conflict-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.sink-conflict-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.35;
+}
+
+.sink-conflict-choice strong {
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
+.sink-conflict-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.sink-conflict-choice-leave {
+  margin-right: auto;
+}
+
+.sink-conflict-actions button:focus-visible,
+.sink-conflict-revisions select:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+  .sink-review-workspace {
+    height: min(84dvh, 900px);
+    max-height: calc(100dvh - 180px);
+  }
+  .sink-review-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(220px, 50%) minmax(0, 1fr);
+  }
+  .sink-review-file-list {
+    max-height: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .sink-conflict-choices {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sink-review-file-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .sink-review-decision {
+    grid-column: 2;
+    max-width: none;
+  }
+  .sink-review-footer {
+    align-items: stretch;
+  }
+  .sink-review-footer-actions {
+    justify-content: flex-end;
+  }
 }
 
 /* --- Setup Wizard --- */

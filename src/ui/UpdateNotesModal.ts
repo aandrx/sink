@@ -8,6 +8,17 @@ interface ReleaseNote {
 
 const LATEST_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.2.15",
+    title: "Safer Sync and Complete Reviews",
+    points: [
+      "Review a complete pull in one workspace, with side-by-side diffs and explicit choices about which version to save.",
+      "Cancelling ends the pull. Secondary-device uploads require permission before files change.",
+      "Divergent edits require a side choice rather than an unsafe automatic merge; deletion review cannot be bypassed by session permission.",
+      "New safety snapshots stay local and are encrypted when vault encryption is enabled. Previously replicated snapshots are not retroactively protected.",
+      "Connection indicators reflect replication state. Keep using disposable-vault tests before a live rollout; grey-screen causality remains unconfirmed.",
+    ],
+  },
+  {
     version: "0.2.14",
     title: "Sync Stability and Editor-Style Diffs",
     points: [

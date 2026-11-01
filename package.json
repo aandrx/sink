@@ -1,13 +1,14 @@
 {
   "name": "sink",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "description": "Simplified Obsidian LiveSync plugin — always-on sync via CouchDB",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "test:e2e": "node tests/e2e.mjs"
   },
   "keywords": [
     "obsidian",

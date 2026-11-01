@@ -81,6 +81,17 @@ export interface DeviceMetaDoc {
   lastPullAt?: number;
 }
 
+export interface ConflictRevision {
+  /** Leaf revision retained by PouchDB. */
+  rev: string;
+  mtime: number;
+  deleted: boolean;
+  isBinary: boolean;
+  size: number;
+  deviceName?: string;
+  deviceId?: string;
+}
+
 export interface SnapshotFileEntry {
   path: string;
   existed: boolean;
@@ -108,17 +119,31 @@ export interface PendingChange {
   remoteMtime: number;
   localMtime?: number;
   remoteDeleted: boolean;
+  /** False when the database has no document for this path yet. */
+  remoteExists?: boolean;
   localExists: boolean;
   localContent?: string;
   remoteContent?: string;
   isBinary: boolean;
   suggested: ChangeDecision;
+  /** Retained database leaves. Their contents are loaded only for the active preview. */
+  conflictRevisions?: ConflictRevision[];
+  /** Default server revision for a retained-conflict row. */
+  conflictRevision?: string;
+  /** Load the selected server leaf for a retained-conflict preview. */
+  loadConflictPreview?: (rev: string) => Promise<{ localContent: string; remoteContent: string }>;
+  /** An unresolved database condition that no side choice can safely apply yet. */
+  blockedReason?: string;
+  /** Load diff content only when the reviewer opens this row. */
+  loadPreview?: () => Promise<{ localContent: string; remoteContent: string }>;
 }
 
 export interface ReviewedChange {
   path: string;
   selected: boolean;
   decision: ChangeDecision;
+  /** Selected retained server leaf for a conflict row. */
+  conflictRevision?: string;
 }
 
 export interface ReviewResult {

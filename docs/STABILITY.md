@@ -23,17 +23,17 @@ Source inspection found real defects, but no Obsidian renderer crash dump or rep
 - Paths with traversal, absolute-path syntax, or noncanonical separators are rejected.
 - Uploads and incoming nondeleted files have a **20 MiB per-file limit**. This is a conservative guard, not streaming support. Larger files are not synced; errors are reported to the developer console. Replication may still download oversized existing remote documents into IndexedDB: these limits are not a hard cap on renderer memory or database size.
 - Each automatic safety snapshot has a **32 MiB estimated in-memory budget**. A batch needing a larger backup is refused rather than applied without a backup.
-- Text auto-merge and diff previews are restricted to 1 MiB combined text; previews also have a 4,000 combined-line limit. Choose keep local/remote after reviewing large files externally.
-- Pulls/reviews are processed in small batches, so a large pull can show several review dialogs rather than one vault-wide dialog.
+- Diff previews are restricted to 1 MiB combined text and 4,000 combined lines. Divergent edits require an explicit side choice; the previous patch-based replacement was not a genuine three-way merge.
+- 0.2.15 provides one review for a complete pull, with paged discovery/application and lazy previews. It also reconciles offline local edits/new files/deletions/divergence after startup, and resolves retained CouchDB revisions through an explicit Local/Remote choice. These are logical operations, not atomic filesystem transactions. A cancelled review ends the operation without applying selected changes.
 - Local edits made while a review is open are detected and skipped, requiring another pull.
 - Disabling config sync does not delete existing server documents, prevent raw database replication, or undo earlier writes. Obsidian's usual vault APIs do not enumerate hidden config files like ordinary notes; this patch does not add a hidden-file watcher or guarantee complete config-folder syncing.
-- Snapshots still embed whole files and are not automatically pruned. Large legacy snapshots can remain expensive to read; do not rebuild/delete the sync database as a diagnostic shortcut without backups.
+- 0.2.15 keeps new snapshots local-only and encrypts their payload when vault encryption is configured. Conflict resolution intentionally retires the retained remote revisions that were reviewed and not chosen; the local snapshot does not back up those remote revisions. Snapshots still embed whole files and are not automatically pruned. Legacy snapshots may already have replicated as plaintext; new encryption does not undo historical exposure. Large legacy snapshots can remain expensive to read; do not rebuild/delete the sync database as a diagnostic shortcut without backups.
 
 ## Safe verification procedure
 
 1. Keep Sink disabled in the live vault. Back up both the vault **including its config folder** and CouchDB. Establish whether Obsidian stays stable with Sink disabled over a comparable workload and time period.
 2. Use a disposable vault and a **separate test CouchDB database**. Do not connect a disposable device with a new identity to the production database: deletions/merges could replicate back to other devices.
-3. Install the rebuilt 0.2.14 plugin into the disposable vault only. Set config sync off explicitly. Use the same updated build on both test devices because Sink's version gate compares exact versions. Preparing a local release commit/tag does not publish or deploy the plugin.
+3. Install the current 0.2.15 development build into the disposable vault only. Set config sync off explicitly. Use the same updated build on both test devices because Sink's version gate compares exact versions. Preparing a local release commit/tag does not publish or deploy the plugin.
 4. Open desktop developer tools (Ctrl+Shift+I), enable **Preserve log**, and monitor Task Manager's Obsidian/Electron processes while testing. Do not paste credentials, setup URIs, or note contents into bug reports.
 5. First test a handful of notes. Then test repeated connection restarts, simultaneous edits on two devices, encrypted text above the chunk threshold (64 KiB), binary attachments, a cancelled review, and disabling Sink while a review is open.
 6. Check that a file above 20 MiB is refused without a vault overwrite and that incomplete/badly encrypted chunks leave local files unchanged. Watch for steadily growing memory during repeated pulls/restarters, unexpected uploads after incoming writes, or duplicate review dialogs.
@@ -43,6 +43,6 @@ Source inspection found real defects, but no Obsidian renderer crash dump or rep
 
 ## Automated checks
 
-The repository now provides `npm test`, `npm run typecheck`, and `npm run build`. Tests exercise the real TypeScript classes with small Obsidian and PouchDB substitutes; they do not execute an Obsidian/Electron renderer or a real CouchDB/IndexedDB instance. Passing them establishes covered code behavior, not absence of a grey-screen crash.
+The repository provides `npm test`, `npm run typecheck`, and `npm run build`. Unit tests exercise real TypeScript classes with small Obsidian/PouchDB substitutes and a DOM environment. `npm run test:e2e` separately targets isolated real Obsidian/Electron, IndexedDB, and CouchDB; it requires Docker, Obsidian, and a graphical display. See [0.2.15 verification evidence](verification/0.2.15.md) for actual results and untested cases. Neither test layer proves absence of a grey-screen crash.
 
 Dependency audit also reports moderate advisories in the existing PouchDB/UUID dependency chain. They are not established as the crash cause. No forced dependency downgrade or breaking audit fix was applied.

@@ -28,10 +28,10 @@ export class StatusBar {
       disconnected: "Sink ○",
     };
     const tooltips: Record<SyncStatus, string> = {
-      connected:    "Sink: Live sync active",
+      connected:    "Sink: Connected to server; pending reviews may still need attention",
       syncing:      "Sink: Syncing changes",
-      error:        "Sink: Sync error, check credentials",
-      paused:       "Sink: Sync paused",
+      error:        "Sink: Sync blocked; check the latest error for details",
+      paused:       "Sink: Waiting for review or permission",
       disconnected: "Sink: Not connected to server",
     };
     const text = labels[this.status] ?? "Sink";
@@ -59,6 +59,7 @@ export class RibbonIcon {
     this.el.removeClass(
       "sink-ribbon-connected",
       "sink-ribbon-syncing",
+      "sink-ribbon-paused",
       "sink-ribbon-error",
       "sink-ribbon-disconnected"
     );
@@ -66,11 +67,15 @@ export class RibbonIcon {
     switch (status) {
       case "connected":
         this.el.addClass("sink-ribbon-connected");
-        this.setLabel(`Sink: Connected - ${this.formatRole(role)}${headState === "behind" ? " - Behind remote" : " - At HEAD"}`);
+        this.setLabel(`Sink: Connected - ${this.formatRole(role)}${headState === "behind" ? " - Pending remote changes" : " - No known pending changes"}`);
         break;
       case "syncing":
         this.el.addClass("sink-ribbon-syncing");
         this.setLabel(`Sink: Syncing - ${this.formatRole(role)}`);
+        break;
+      case "paused":
+        this.el.addClass("sink-ribbon-paused");
+        this.setLabel(`Sink: Waiting for review or permission - ${this.formatRole(role)}`);
         break;
       case "error":
         this.el.addClass("sink-ribbon-error");

@@ -8,6 +8,7 @@ import { SetupWizard } from "./SetupWizard";
 
 export class SinkSettingsTab extends PluginSettingTab {
   plugin: SinkPlugin;
+  private snapshotRenderGeneration = 0;
 
   constructor(app: App, plugin: SinkPlugin) {
     super(app, plugin);
@@ -80,6 +81,22 @@ export class SinkSettingsTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Apply connection settings")
+      .setDesc("Save these connection details and restart sync explicitly. Changes do not restart a running sync on their own.")
+      .addButton((btn) =>
+        btn.setButtonText("Save and reconnect").setCta().onClick(async () => {
+          await this.plugin.saveSettings();
+          if (this.plugin.getSyncEngine() || this.plugin.settings.isConfigured) {
+            new Notice("Sink: Applying connection settings...");
+            await this.plugin.startSync();
+            if (this.plugin.getSyncEngine()) new Notice("Sink: Connection settings applied");
+          } else {
+            new Notice("Sink: Connection settings saved");
+          }
+        })
+      );
+
+    new Setting(containerEl)
       .setName("Test connection")
       .setDesc("Verify the server is reachable and credentials work")
       .addButton((btn) =>
@@ -103,7 +120,7 @@ export class SinkSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Encryption passphrase")
-      .setDesc("Encrypts all content before storing in CouchDB. All devices must use the same passphrase.")
+      .setDesc("Encrypts new file content and local snapshot payloads. Paths and device metadata remain visible. All devices must use the same passphrase; changing it does not re-encrypt existing data.")
       .addText((text) => {
         text.inputEl.type = "password";
         text
@@ -133,8 +150,8 @@ export class SinkSettingsTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Auto-resolve conflicts")
-      .setDesc("Automatically merge conflicting edits. Disable to be prompted for manual resolution.")
+      .setName("Auto-apply safe updates")
+      .setDesc("Allow verified updates when this device has not edited the file. Divergent edits and deletions still require a side choice. Disable to review updates to existing files.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.autoResolveConflicts)
@@ -159,11 +176,11 @@ export class SinkSettingsTab extends PluginSettingTab {
     const engine = this.plugin.getSyncEngine();
     if (engine) {
       new Setting(containerEl)
-        .setName("Session merge allowance")
-        .setDesc("Allow merges for this Obsidian session without extra prompts until Sink stops or Obsidian closes.")
+        .setName("Session upload permission")
+        .setDesc("Allow this device to publish for this session. This does not combine text or bypass conflict and deletion reviews. Permission ends when Sink stops or Obsidian closes.")
         .addButton((btn) =>
           btn
-            .setButtonText(engine.isSessionMergeAllowed ? "Disable for session" : "Allow merges for this session")
+            .setButtonText(engine.isSessionMergeAllowed ? "Revoke session permission" : "Allow uploads for this session")
             .setCta()
             .onClick(async () => {
               const currentEngine = this.plugin.getSyncEngine();
@@ -171,10 +188,10 @@ export class SinkSettingsTab extends PluginSettingTab {
 
               if (currentEngine.isSessionMergeAllowed) {
                 currentEngine.clearSessionMergeAllowance();
-                new Notice("Session merge prompts re-enabled for this Obsidian session");
+                new Notice("Session upload permission revoked");
               } else {
                 currentEngine.allowMergesForSession();
-                new Notice("Session merge prompts disabled for this Obsidian session");
+                new Notice("Session uploads allowed; conflict and deletion reviews remain enabled");
               }
               this.display();
             })
@@ -374,6 +391,7 @@ export class SinkSettingsTab extends PluginSettingTab {
   }
 
   private async renderSnapshots(container: HTMLElement, infoEl: HTMLElement): Promise<void> {
+    const renderGeneration = ++this.snapshotRenderGeneration;
     container.empty();
     const engine = this.plugin.getSyncEngine();
     if (!engine) {
@@ -381,81 +399,119 @@ export class SinkSettingsTab extends PluginSettingTab {
       return;
     }
 
-    const snapshots = await engine.listSnapshots(15);
-    if (snapshots.length === 0) {
-      infoEl.setText("No restore points found yet.");
-      return;
-    }
-
-    infoEl.setText("Restore points are local safety snapshots taken before risky batches are applied.");
-
-    const selectorRow = container.createDiv({ cls: "sink-snapshot-selector-row" });
-    const select = selectorRow.createEl("select", { cls: "sink-snapshot-select" });
-    const refreshBtn = selectorRow.createEl("button", { text: "Refresh", cls: "mod-cta" });
-    const restoreBtn = selectorRow.createEl("button", { text: "Restore snapshot" });
-
-    const snapshotDetails = container.createDiv({ cls: "sink-snapshot-details" });
-    const selectedSnapshot = snapshots[0];
-
-    for (const snapshot of snapshots) {
-      const option = select.createEl("option", {
-        text: `${this.formatTimestamp(snapshot.createdAt)} • ${snapshot.reason}`,
-      });
-      option.value = snapshot.id;
-    }
-    select.value = selectedSnapshot.id;
-
-    const renderSelected = async (snapshotId: string) => {
-      snapshotDetails.empty();
-      const snapshot = await engine.getSnapshotDetails(snapshotId);
-      if (!snapshot) {
-        snapshotDetails.createEl("p", { text: "Snapshot not found." });
+    try {
+      const snapshots = await engine.listSnapshots(15);
+      if (renderGeneration !== this.snapshotRenderGeneration) return;
+      if (snapshots.length === 0) {
+        infoEl.setText("No restore points found yet.");
         return;
       }
 
-      snapshotDetails.createEl("h3", { text: `${this.formatTimestamp(snapshot.createdAt)} • ${snapshot.reason}` });
-      snapshotDetails.createEl("p", {
-        text: `Source: ${snapshot.sourceDevice} • ${snapshot.files.length} files`,
-        cls: "setting-item-description",
+      infoEl.setText("Restore points are local safety snapshots taken before risky batches are applied.");
+
+      const selectorRow = container.createDiv({ cls: "sink-snapshot-selector-row" });
+      const select = selectorRow.createEl("select", { cls: "sink-snapshot-select" });
+      const refreshBtn = selectorRow.createEl("button", { text: "Refresh", cls: "mod-cta" });
+      const restoreBtn = selectorRow.createEl("button", { text: "Restore snapshot" });
+
+      const snapshotDetails = container.createDiv({ cls: "sink-snapshot-details" });
+      const selectedSnapshot = snapshots[0];
+
+      for (const snapshot of snapshots) {
+        const option = select.createEl("option", {
+          text: `${this.formatTimestamp(snapshot.createdAt)} • ${snapshot.reason}`,
+        });
+        option.value = snapshot.id;
+      }
+      select.value = selectedSnapshot.id;
+
+      let selectionGeneration = 0;
+      const renderSelected = async (snapshotId: string) => {
+        const selection = ++selectionGeneration;
+        const isCurrent = () => renderGeneration === this.snapshotRenderGeneration && selection === selectionGeneration;
+        snapshotDetails.empty();
+        try {
+          const snapshot = await engine.getSnapshotDetails(snapshotId);
+          if (!isCurrent()) return;
+          if (!snapshot) {
+            snapshotDetails.createEl("p", { text: "Snapshot not found." });
+            return;
+          }
+
+          const ordered = await this.orderSnapshotFilesByChange(snapshot);
+          if (!isCurrent()) return;
+
+          snapshotDetails.empty();
+          snapshotDetails.createEl("h3", { text: `${this.formatTimestamp(snapshot.createdAt)} • ${snapshot.reason}` });
+          snapshotDetails.createEl("p", {
+            text: `Source: ${snapshot.sourceDevice} • ${snapshot.files.length} files`,
+            cls: "setting-item-description",
+          });
+
+          const fileList = snapshotDetails.createDiv({ cls: "sink-snapshot-file-list" });
+          for (const fileEntry of ordered) {
+            this.renderSnapshotFileRow(fileList, snapshot, fileEntry);
+          }
+        } catch (error) {
+          if (!isCurrent()) return;
+          snapshotDetails.empty();
+          this.renderSnapshotError(snapshotDetails, error, "Could not load this restore point");
+        }
+      };
+
+      select.addEventListener("change", () => {
+        void renderSelected(select.value);
       });
 
-      const fileList = snapshotDetails.createDiv({ cls: "sink-snapshot-file-list" });
-      const ordered = await this.orderSnapshotFilesByChange(snapshot);
-      for (const fileEntry of ordered) {
-        this.renderSnapshotFileRow(fileList, snapshot, fileEntry);
-      }
-    };
+      refreshBtn.addEventListener("click", () => {
+        void this.renderSnapshots(container, infoEl);
+      });
 
-    select.addEventListener("change", () => {
-      void renderSelected(select.value);
-    });
+      restoreBtn.addEventListener("click", async () => {
+        const snapshot = snapshots.find((entry) => entry.id === select.value) ?? snapshots[0];
+        const ok = window.confirm(
+          `Restore snapshot from ${this.formatTimestamp(snapshot.createdAt)} affecting ${snapshot.fileCount} files?`
+        );
+        if (!ok) return;
 
-    refreshBtn.addEventListener("click", async () => {
-      await this.renderSnapshots(container, infoEl);
-    });
+        restoreBtn.disabled = true;
+        try {
+          const restored = await engine.restoreSnapshot(snapshot.id);
+          new Notice(`Sink: Restored ${restored} files from snapshot`);
+        } catch (error) {
+          const detail = error instanceof Error && error.message ? `: ${error.message}` : "";
+          const message = `Restore did not complete${detail}. Some files may already have been restored; review the vault before retrying.`;
+          snapshotDetails.empty();
+          snapshotDetails.createEl("p", { text: message, cls: "setting-item-description" });
+          new Notice(`Sink: ${message}`);
+        } finally {
+          restoreBtn.disabled = false;
+        }
+      });
 
-    restoreBtn.addEventListener("click", async () => {
-      const snapshot = snapshots.find((entry) => entry.id === select.value) ?? snapshots[0];
-      const ok = window.confirm(
-        `Restore snapshot from ${this.formatTimestamp(snapshot.createdAt)} affecting ${snapshot.fileCount} files?`
-      );
-      if (!ok) return;
+      void renderSelected(selectedSnapshot.id);
+    } catch (error) {
+      if (renderGeneration !== this.snapshotRenderGeneration) return;
+      container.empty();
+      infoEl.setText("Restore points could not be loaded.");
+      this.renderSnapshotError(container, error, "Could not load restore points");
+    }
+  }
 
-      const restored = await engine.restoreSnapshot(snapshot.id);
-      new Notice(`Sink: Restored ${restored} files from snapshot`);
-    });
-
-    void renderSelected(selectedSnapshot.id);
+  private renderSnapshotError(container: HTMLElement, error: unknown, fallback: string): void {
+    const detail = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+    const message = detail ? `${fallback}: ${detail}` : fallback;
+    const bounded = message.length > 300 ? `${message.slice(0, 300)}...` : message;
+    container.createEl("p", { text: bounded, cls: "setting-item-description" });
+    new Notice(`Sink: ${bounded}`);
   }
 
   private async orderSnapshotFilesByChange(snapshot: SnapshotMetaDoc): Promise<SnapshotFileEntry[]> {
-    const files = [...snapshot.files];
-    const scored = await Promise.all(
-      files.map(async (entry) => ({
-        entry,
-        changed: await this.hasSnapshotFileChanged(entry),
-      }))
-    );
+    const scored: Array<{ entry: SnapshotFileEntry; changed: boolean }> = [];
+    // Compare one file at a time so binary snapshots do not allocate every whole file concurrently.
+    for (const entry of snapshot.files) {
+      scored.push({ entry, changed: await this.hasSnapshotFileChanged(entry) });
+    }
 
     return scored
       .sort((left, right) => Number(right.changed) - Number(left.changed) || left.entry.path.localeCompare(right.entry.path))
@@ -494,28 +550,32 @@ export class SinkSettingsTab extends PluginSettingTab {
   }
 
   private async showSnapshotDiff(snapshot: SnapshotMetaDoc, entry: SnapshotFileEntry): Promise<void> {
-    const current = this.app.vault.getAbstractFileByPath(entry.path);
-    const currentText = await this.getCurrentFileText(entry);
-    const snapshotText = entry.content;
+    try {
+      const currentText = await this.getCurrentFileText(entry);
+      const snapshotText = entry.content;
 
-    const modal = new Modal(this.app);
-    modal.onOpen = () => {
-      modal.modalEl.addClass("mod-sink-wide");
-      const { contentEl } = modal;
-      contentEl.empty();
-      contentEl.addClass("sink-conflict-modal");
-      contentEl.createEl("h3", { text: entry.path });
-      contentEl.createEl("p", { text: `Snapshot: ${this.formatTimestamp(snapshot.createdAt)} • ${snapshot.reason}` });
+      const modal = new Modal(this.app);
+      modal.onOpen = () => {
+        modal.modalEl.addClass("mod-sink-wide");
+        const { contentEl } = modal;
+        contentEl.empty();
+        contentEl.addClass("sink-conflict-modal");
+        contentEl.createEl("h3", { text: entry.path });
+        contentEl.createEl("p", { text: `Snapshot: ${this.formatTimestamp(snapshot.createdAt)} • ${snapshot.reason}` });
 
-      if (entry.isBinary) {
-        contentEl.createEl("p", { text: "Binary diff preview is not available for this file." });
-        return;
-      }
+        if (entry.isBinary) {
+          contentEl.createEl("p", { text: "Binary diff preview is not available for this file." });
+          return;
+        }
 
-      renderSplitDiff(contentEl, "Current", "Snapshot", currentText, snapshotText);
-    };
+        renderSplitDiff(contentEl, "Current", "Snapshot", currentText, snapshotText);
+      };
 
-    modal.open();
+      modal.open();
+    } catch (error) {
+      const detail = error instanceof Error && error.message ? `: ${error.message}` : "";
+      new Notice(`Sink: Could not open the snapshot diff${detail}`);
+    }
   }
 
   private async getCurrentFileText(entry: SnapshotFileEntry): Promise<string> {

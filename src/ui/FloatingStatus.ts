@@ -22,7 +22,11 @@ export class FloatingStatus {
 
   setStatus(status: SyncStatus): void {
     this.status = status;
-    // Only update display text if not currently showing activity
+    // A blocked/disconnected/review state must interrupt stale file activity.
+    if (status !== "connected" && status !== "syncing" && this.revertTimer) {
+      clearTimeout(this.revertTimer);
+      this.revertTimer = null;
+    }
     if (!this.revertTimer) {
       this.renderIdle();
     }

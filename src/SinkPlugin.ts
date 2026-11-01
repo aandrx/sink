@@ -4,7 +4,6 @@ import { SinkSettingsTab } from "./ui/SettingsTab";
 import { StatusBar, RibbonIcon } from "./ui/StatusBar";
 import { FloatingStatus } from "./ui/FloatingStatus";
 import { SetupWizard } from "./ui/SetupWizard";
-import { ConflictModal } from "./ui/ConflictModal";
 import { UpdateNotesModal } from "./ui/UpdateNotesModal";
 import { parseSetupURI, applySetupPayload } from "./utils/uri";
 import { DEFAULT_SETTINGS, type SinkSettings, type SyncStatus } from "./settings";
@@ -179,7 +178,7 @@ export default class SinkPlugin extends Plugin {
 
       await this.syncEngine.start();
       await this.refreshRibbonState();
-      if (!this.unloaded) this.statusBar?.setStatus("connected");
+      if (!this.unloaded) this.statusBar?.setStatus(engine.getStatus());
     } catch (e: any) {
       this.syncEngine = null;
       await engine.shutdown().catch((error) => console.error("Sink startup cleanup failed:", error));
@@ -226,7 +225,7 @@ export default class SinkPlugin extends Plugin {
         break;
       case "conflict":
         if (!this.settings.autoResolveConflicts) {
-          new ConflictModal(this.app, event.path, "", "").open();
+          new Notice(`Sink: Conflict in ${event.path}. Automatic merge failed; review the file or resolve it manually, then sync again.`);
         }
         break;
     }

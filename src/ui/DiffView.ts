@@ -136,7 +136,7 @@ export function renderSplitDiff(container: HTMLElement, leftLabel: string, right
   try {
     rows = buildSplitDiff(leftText, rightText);
   } catch {
-    container.createEl("p", { text: "Preview omitted for safety: this diff is too large. Review the files externally, then choose keep local or keep remote." });
+    container.createEl("p", { text: "Preview omitted for safety: this diff is too large. Review the files externally, then choose Local, Remote, or Skip." });
     return;
   }
 
