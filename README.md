@@ -4,9 +4,9 @@ A minimal self-hosted sync plugin for [Obsidian](https://obsidian.md). Always-on
 
 Forked from the architecture of [obsidian-livesync](https://github.com/vrtmrz/obsidian-livesync), stripped to the essentials.
 
-## Release: 0.2.16
+## Release: 0.2.17
 
-Fixes the IndexedDB connection-closing error during plugin reload and startup. Includes the 0.2.15 complete-operation reviews, Local/Remote conflict resolution, startup reconciliation, local encrypted snapshots, and truthful connection status. See [0.2.16 release notes](docs/releases/0.2.16.md) and [0.2.15 release notes](docs/releases/0.2.15.md). Grey-screen crash causality remains unconfirmed; use the [controlled test plan](docs/STABILITY.md) before enabling Sink in a live vault. Development checks require Node.js 22.22.2+ (Node 22 LTS recommended).
+Fixes the IndexedDB connection-closing error during plugin teardown. Includes the 0.2.15 complete-operation reviews, Local/Remote conflict resolution, startup reconciliation, local encrypted snapshots, and truthful connection status. See [0.2.17 release notes](docs/releases/0.2.17.md), [0.2.16 notes](docs/releases/0.2.16.md), and [0.2.15 notes](docs/releases/0.2.15.md). Grey-screen crash causality remains unconfirmed; use the [controlled test plan](docs/STABILITY.md) before enabling Sink in a live vault. Development checks require Node.js 22.22.2+ (Node 22 LTS recommended).
 
 ---
 

@@ -376,7 +376,7 @@ test("write suppression spans slow async writes and briefly persists after compl
   assert.equal(engine.isProcessing("note.md"), true);
 });
 
-test("shutdown cancels an open review and closes the database without applying", async () => {
+test("shutdown cancels an open review without applying or closing the shared database", async () => {
   const { engine, vault, db } = fixture();
   const previous = BatchReviewModal.prototype.onOpen;
   BatchReviewModal.prototype.onOpen = () => {};
@@ -387,11 +387,11 @@ test("shutdown cancels an open review and closes the database without applying",
     assert.equal((await reviewing).approved, false);
     await engine.applyRemoteChange(prepared);
     assert.equal(vault.writes.length, 0);
-    assert.equal(db.closed, true);
+    assert.equal(db.closed, undefined);
   } finally { BatchReviewModal.prototype.onOpen = previous; }
 });
 
-test("shutdown waits for a pending startup before closing IndexedDB", async () => {
+test("shutdown waits for a pending startup before releasing the engine", async () => {
   const { engine, db } = fixture();
   const entered = gate();
   const release = gate();
@@ -409,7 +409,7 @@ test("shutdown waits for a pending startup before closing IndexedDB", async () =
     release.resolve();
     await starting;
     await stopping;
-    assert.equal(db.closed, true);
+    assert.equal(db.closed, undefined);
   } finally {
     Replicator.prototype.pullOnce = original;
   }
@@ -476,7 +476,7 @@ test("plugin restarts do not add vault listeners or retain old local databases",
   const previous = plugin.getSyncEngine().localDB.instance;
   await Promise.all([plugin.startSync(), plugin.startSync()]);
   assert.equal(vault.listeners.length, 4);
-  assert.equal(previous.closed, true);
+  assert.equal(previous.closed, undefined);
   await plugin.onunload();
   assert.equal(plugin.getSyncEngine(), null);
 });

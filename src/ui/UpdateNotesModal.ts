@@ -8,6 +8,15 @@ interface ReleaseNote {
 
 const LATEST_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.2.17",
+    title: "IndexedDB Teardown Fix",
+    points: [
+      "Stopped closing the shared IndexedDB connection during plugin shutdown. PouchDB keeps that connection for the replacement plugin instance.",
+      "Shutdown still waits for an in-progress startup and drains queued sync work before the engine is released.",
+      "0.2.16 and 0.2.15 features are unchanged.",
+    ],
+  },
+  {
     version: "0.2.16",
     title: "IndexedDB Lifecycle Fix",
     points: [

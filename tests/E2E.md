@@ -30,8 +30,8 @@ The controller tracks one pending manual pull at a time. It does not wait blindl
 
 Parent-verified run: **9 passed, zero failed**.
 
-Evidence: `/tmp/sink-e2e-artifacts/2026-11-01T22-25-59-579Z-bc8f06/evidence.json`.
+Evidence: `/tmp/sink-e2e-artifacts/2026-11-01T22-38-18-057Z-cc672e/evidence.json`.
 
-See `docs/verification/0.2.16.md` for the patch evidence and `docs/verification/0.2.15.md` for the release review, audit findings, cleanup, and remaining verification limits. The final full run passed 9/9. Earlier failed runs are intentionally preserved in separate artifact directories rather than overwritten.
+See `docs/verification/0.2.17.md` and `docs/verification/0.2.16.md` for the patch evidence and `docs/verification/0.2.15.md` for the release review, audit findings, cleanup, and remaining verification limits. The final full run passed 9/9. Earlier failed runs are intentionally preserved in separate artifact directories rather than overwritten.
 
 Two local processes do not establish cross-device/OS/mobile behavior, real tailnet outage recovery, or long-duration grey-screen/memory stability. Never run this against a production vault/database.

@@ -467,12 +467,14 @@ export class SyncEngine {
     await this.remoteDB.disconnect();
   }
 
-  /** Plugin replacements must also release the IndexedDB connection. */
+  /** Stop all work before a replacement engine starts. The IndexedDB connection
+   * is intentionally left open: PouchDB caches it by database name, and closing
+   * it here can interrupt a replacement instance that is already starting.
+   * Explicit database rebuilds still destroy the database. */
   async shutdown(): Promise<void> {
     await this.stop();
     await this.startPromise?.catch(() => undefined);
     await this.operationQueue;
-    await this.localDB.close();
   }
 
   /** Handle a file being created or modified in the vault */
