@@ -8,6 +8,15 @@ interface ReleaseNote {
 
 const LATEST_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.2.18",
+    title: "Bounded Device History",
+    points: [
+      "Bounds local device metadata revisions and enables automatic PouchDB compaction, preventing oversized IndexedDB heartbeat records.",
+      "Fixes the manual sync and status failure caused by an unreadable legacy device document.",
+      "Existing oversized device history requires one local database rebuild. Back up the vault first; notes and the remote database are unchanged.",
+    ],
+  },
+  {
     version: "0.2.17",
     title: "IndexedDB Teardown Fix",
     points: [

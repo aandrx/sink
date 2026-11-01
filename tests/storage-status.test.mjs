@@ -22,7 +22,8 @@ class FakeReplication extends EventEmitter {
 }
 
 class MockDB {
-  constructor() {
+  constructor(_name, options = {}) {
+    this.options = options;
     this.docs = new Map();
     this.queries = [];
     this.writes = [];
@@ -100,6 +101,12 @@ const snapshotDoc = (id, content = "snapshot content", createdAt = 100) => ({
 });
 
 const localSnapshotId = (id) => `_local/sink-snapshot:${id}`;
+
+test("local PouchDB bounds device heartbeat revision growth", () => {
+  const local = new LocalDB("bounded-heartbeats");
+  assert.equal(local.instance.options.auto_compaction, true);
+  assert.equal(local.instance.options.revs_limit, 100);
+});
 
 test("new snapshots are local-only, summary reads stay metadata-only, and legacy snapshots remain readable", async () => {
   const local = new LocalDB("test");

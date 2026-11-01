@@ -39,7 +39,13 @@ export class LocalDB {
 
   constructor(vaultName: string) {
     this.dbName = `sink-${vaultName.replace(/[^a-zA-Z0-9]/g, "_")}`;
-    this.db = new PouchDB(this.dbName, { adapter: "idb" });
+    this.db = new PouchDB(this.dbName, {
+      adapter: "idb",
+      // Device heartbeat records would otherwise accumulate an unbounded revision
+      // tree until IndexedDB cannot read them.
+      auto_compaction: true,
+      revs_limit: 100,
+    });
     this.generation = ++LocalDB.nextGeneration;
     LocalDB.latestGeneration.set(this.dbName, this.generation);
   }
