@@ -30,8 +30,8 @@ export class StatusBar {
     const tooltips: Record<SyncStatus, string> = {
       connected:    "Sink: Connected to server",
       syncing:      "Sink: Syncing changes",
-      error:        "Sink: Sync blocked; check the latest error for details",
-      paused:       "Sink: Waiting for review or permission",
+      error:        "Sink: Sync blocked. Open Settings > Sink > Troubleshooting to retry.",
+      paused:       "Sink: Waiting for review or permission. Open Settings > Sink > Troubleshooting to reopen pending work.",
       disconnected: "Sink: Not connected to server",
     };
     const text = labels[this.status] ?? "Sink";

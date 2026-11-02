@@ -8,6 +8,15 @@ interface ReleaseNote {
 
 const LATEST_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.2.21",
+    title: "Recovery from Blocked Sync",
+    points: [
+      "Added Settings > Sink > Troubleshooting with a Review issues action and a Restart sync action.",
+      "Added the Resolve pending sync issues command for deferred changes, retained conflicts, or blocked retries.",
+      "Status bar tooltips now point to the recovery path instead of only reporting a blocked state.",
+    ],
+  },
+  {
     version: "0.2.20",
     title: "UI Clarity and Safety",
     points: [

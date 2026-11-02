@@ -4,9 +4,9 @@ A minimal self-hosted sync plugin for [Obsidian](https://obsidian.md). Always-on
 
 Forked from the architecture of [obsidian-livesync](https://github.com/vrtmrz/obsidian-livesync), stripped to the essentials.
 
-## Release: 0.2.20
+## Release: 0.2.21
 
-UI clarity and safety improvements across status indicators, review, diffs, settings, setup, and update notes. No sync backend changes. See [0.2.20 release notes](docs/releases/0.2.20.md), [0.2.19 notes](docs/releases/0.2.19.md), [0.2.18 notes](docs/releases/0.2.18.md), [0.2.17 notes](docs/releases/0.2.17.md), [0.2.16 notes](docs/releases/0.2.16.md), and [0.2.15 notes](docs/releases/0.2.15.md). Grey-screen crash causality remains unconfirmed; use the [controlled test plan](docs/STABILITY.md) before enabling Sink in a live vault. Development checks require Node.js 22.22.2+ (Node 22 LTS recommended).
+Adds recovery actions for blocked or paused sync: Settings > Sink > Troubleshooting and the Resolve pending sync issues command. Includes the 0.2.20 UI clarity and safety work. See [0.2.21 release notes](docs/releases/0.2.21.md), [0.2.20 notes](docs/releases/0.2.20.md), [0.2.19 notes](docs/releases/0.2.19.md), [0.2.18 notes](docs/releases/0.2.18.md), [0.2.17 notes](docs/releases/0.2.17.md), [0.2.16 notes](docs/releases/0.2.16.md), and [0.2.15 notes](docs/releases/0.2.15.md). Grey-screen crash causality remains unconfirmed; use the [controlled test plan](docs/STABILITY.md) before enabling Sink in a live vault. Development checks require Node.js 22.22.2+ (Node 22 LTS recommended).
 
 ---
 

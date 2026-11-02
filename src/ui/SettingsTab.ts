@@ -300,6 +300,38 @@ export class SinkSettingsTab extends PluginSettingTab {
 
     void this.renderSnapshots(backupContainer, backupInfo);
 
+    // --- Troubleshooting Section ---
+    containerEl.createEl("h2", { text: "Troubleshooting" });
+    const syncEngine = this.plugin.getSyncEngine();
+    const syncStatus = syncEngine?.getStatus() ?? "disconnected";
+    const syncHead = syncEngine?.getSyncHeadState() ?? "head";
+    containerEl.createEl("p", {
+      text: syncEngine
+        ? `Status: ${syncStatus}. ${syncHead === "behind" ? "Pending work may need a decision." : "No known pending changes."}`
+        : "Sync is not running. Start it to review pending work.",
+      cls: "setting-item-description",
+    });
+
+    new Setting(containerEl)
+      .setName("Resolve pending sync issues")
+      .setDesc("Reopen the review for deferred changes, retained conflicts, or a blocked retry.")
+      .addButton((btn) =>
+        btn
+          .setButtonText("Review issues")
+          .setDisabled(!syncEngine)
+          .onClick(() => void this.plugin.resolvePendingSync())
+      );
+
+    new Setting(containerEl)
+      .setName("Restart sync")
+      .setDesc("Stop and start the sync engine with the current settings. Use after a connection or review failure.")
+      .addButton((btn) =>
+        btn.setButtonText("Restart").onClick(async () => {
+          await this.plugin.startSync();
+          this.display();
+        })
+      );
+
     // --- Actions Section ---
     containerEl.createEl("h2", { text: "Actions" });
 

@@ -123,6 +123,35 @@ export default class SinkPlugin extends Plugin {
         new Notice(`Sink status: ${status}`);
       },
     });
+
+    this.addCommand({
+      id: "sink-resolve-pending",
+      name: "Resolve pending sync issues",
+      callback: async () => {
+        await this.resolvePendingSync();
+      },
+    });
+  }
+
+  /** Reopen the existing review path for blocked, paused, or deferred work. */
+  async resolvePendingSync(): Promise<void> {
+    const engine = this.syncEngine;
+    if (!engine) {
+      new Notice("Sink: Sync is not running. Start Sink before resolving pending issues.");
+      return;
+    }
+
+    new Notice("Sink: Checking for pending changes...");
+    try {
+      const applied = await engine.pullServerToVault();
+      if (engine.getSyncHeadState() === "behind") {
+        new Notice("Sink: Pending issues remain. Review the open dialog, then run Resolve pending sync issues again.");
+      } else {
+        new Notice(`Sink: Sync review complete${applied > 0 ? ` (${applied} files)` : ""}.`);
+      }
+    } catch (error: any) {
+      new Notice(`Sink: Pending sync issues remain — ${error.message}`);
+    }
   }
 
   async onunload() {
