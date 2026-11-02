@@ -75,10 +75,24 @@ function canKeepRemote(change: PendingChange): boolean {
 
 function createRowState(change: PendingChange): RowState {
 	return {
-		selected: true,
+		// A blocked row has no applicable decision, so it starts unselected and is
+		// excluded from the selection summary and bulk actions.
+		selected: !change.blockedReason,
 		decision: normalizeDecision(change.suggested, change),
 		conflictRevision: defaultConflictRevision(change),
 	};
+}
+
+interface SelectionCounts {
+	total: number;
+	local: number;
+	remote: number;
+	deletesLocal: number;
+	deletesRemote: number;
+}
+
+function fileCount(count: number): string {
+	return `${count} file${count === 1 ? "" : "s"}`;
 }
 
 function setRowDecision(change: PendingChange, state: RowState, decision: SupportedDecision): void {
@@ -142,6 +156,7 @@ export class BatchReviewModal extends Modal {
 	private pageStatusEl: HTMLElement | null = null;
 	private selectionEl: HTMLElement | null = null;
 	private footerNoteEl: HTMLElement | null = null;
+	private bulkNoticeEl: HTMLElement | null = null;
 	private previousButton: HTMLButtonElement | null = null;
 	private nextButton: HTMLButtonElement | null = null;
 	private readonly rowEls = new Map<string, HTMLElement>();
@@ -244,12 +259,26 @@ export class BatchReviewModal extends Modal {
 			text: "Apply writes the decisions for every selected file in one operation.",
 			cls: "setting-item-description sink-review-footer-note",
 		});
+		this.bulkNoticeEl = footer.createEl("p", {
+			cls: "setting-item-description sink-review-bulk-note",
+			attr: { "aria-live": "polite" },
+		});
 		const actions = footer.createDiv({ cls: "sink-review-footer-actions" });
 		const cancelButton = actions.createEl("button", { text: "Cancel" });
 		cancelButton.addEventListener("click", () => this.cancel());
 		const applyButton = actions.createEl("button", { text: "Apply selected", cls: "mod-cta sink-review-apply" });
 		applyButton.addEventListener("click", () => this.applySelected());
 		this.applyButtons.push(applyButton);
+
+		this.previewEl.addEventListener("keydown", (event) => {
+			if (event.key !== "Escape") return;
+			const row = this.activePath ? this.rowEls.get(this.activePath) : null;
+			const button = row?.querySelector<HTMLElement>(".sink-review-file-path");
+			if (!button) return;
+			event.preventDefault();
+			event.stopPropagation();
+			button.focus();
+		});
 
 		this.renderList();
 		this.diffOpen = false;
@@ -299,7 +328,7 @@ export class BatchReviewModal extends Modal {
 		const pageChanges = this.changes.slice(start, start + PAGE_SIZE);
 		if (pageChanges.length === 0) {
 			this.listEl.createEl("p", {
-				text: "No files in this operation.",
+				text: "No files to review in this operation.",
 				cls: "setting-item-description",
 			});
 		}
@@ -331,6 +360,7 @@ export class BatchReviewModal extends Modal {
 			const next = this.states.get(change.path) ?? state;
 			next.selected = checkbox.checked;
 			this.states.set(change.path, next);
+			this.clearBulkNotice();
 			this.updateSelectionSummary();
 		});
 
@@ -341,7 +371,9 @@ export class BatchReviewModal extends Modal {
 			attr: { title: change.path },
 		});
 		if (change.path === this.activePath) pathButton.setAttribute("aria-current", "true");
-		pathButton.addEventListener("click", () => this.setActive(change.path, true, true));
+		// Keep keyboard focus on the file name. Opening the diff must not move
+		// focus into the preview; Escape in the preview returns focus here.
+		pathButton.addEventListener("click", () => this.setActive(change.path, false, true));
 		main.createDiv({ cls: "sink-review-file-meta", text: this.describeChange(change) });
 
 		const decision = row.createEl("select", {
@@ -360,7 +392,7 @@ export class BatchReviewModal extends Modal {
 					: true;
 			if (!available) {
 				option.disabled = true;
-				option.setText(`${DECISION_LABELS[value]} (unavailable)`);
+				option.setText(`${DECISION_LABELS[value]} (absent)`);
 			}
 		}
 		decision.value = state.decision;
@@ -370,6 +402,7 @@ export class BatchReviewModal extends Modal {
 			setRowDecision(change, next, decision.value as SupportedDecision);
 			this.states.set(change.path, next);
 			decision.value = next.decision;
+			this.clearBulkNotice();
 			this.updateSelectionSummary();
 			if (change.path === this.activePath) {
 				this.updateActiveConsequence();
@@ -409,23 +442,77 @@ export class BatchReviewModal extends Modal {
 
 	private updateSelectionSummary(): void {
 		if (!this.selectionEl) return;
-		const selected = this.changes.filter((change) => this.states.get(change.path)?.selected).length;
-		this.selectionEl.setText(` • ${selected} of ${this.changes.length} selected`);
-		const hasEffective = this.hasEffectiveDecisions();
-		for (const button of this.applyButtons) button.disabled = this.submitting || !hasEffective;
-		this.footerNoteEl?.setText(hasEffective
-			? "Apply writes the decisions for every selected file in one operation."
-			: "Nothing selected: choose Local or Remote for at least one file.");
+		const blocked = this.changes.filter((change) => change.blockedReason).length;
+		const selectable = this.changes.length - blocked;
+		const selected = this.changes.filter((change) => !change.blockedReason && this.states.get(change.path)?.selected).length;
+		const counts = this.selectionCounts();
+		const effective = counts.total;
+		const parts = [effective !== selected
+			? ` • ${selected} selected • ${effective} applicable`
+			: ` • ${effective} of ${selectable} applicable`];
+		if (blocked > 0) parts.push(`${blocked} blocked`);
+		this.selectionEl.setText(parts.join(" • "));
+		for (const button of this.applyButtons) button.disabled = this.submitting || counts.total === 0;
+		this.footerNoteEl?.setText(this.footerSummary(counts));
 	}
 
-	private hasEffectiveDecisions(): boolean {
-		return this.changes.some((change) => {
+	private selectionCounts(): SelectionCounts {
+		const counts: SelectionCounts = { total: 0, local: 0, remote: 0, deletesLocal: 0, deletesRemote: 0 };
+		for (const change of this.changes) {
+			if (change.blockedReason) continue;
 			const state = this.states.get(change.path);
-			if (!state?.selected || state.decision === "skip") return false;
-			if (state.decision === "keep-local") return canKeepLocal(change);
-			if (state.decision === "keep-remote") return canKeepRemote(change);
-			return false;
-		});
+			if (!state?.selected || state.decision === "skip") continue;
+			if (state.decision === "keep-local") {
+				if (!canKeepLocal(change)) continue;
+				counts.local++;
+				// Local without a local file publishes a deletion of the remote copy.
+				if (!change.localExists && !serverAbsent(change)) counts.deletesRemote++;
+			} else if (state.decision === "keep-remote") {
+				if (!canKeepRemote(change)) continue;
+				counts.remote++;
+				// Remote that is already a deletion removes the local file.
+				if (change.remoteDeleted && change.localExists) counts.deletesLocal++;
+			}
+		}
+		counts.total = counts.local + counts.remote;
+		return counts;
+	}
+
+	private deletionList(counts: SelectionCounts): string[] {
+		const deletions: string[] = [];
+		if (counts.deletesLocal > 0) deletions.push(`${fileCount(counts.deletesLocal)} in this vault (Remote)`);
+		if (counts.deletesRemote > 0) deletions.push(`${fileCount(counts.deletesRemote)} in the database (Local)`);
+		return deletions;
+	}
+
+	private footerSummary(counts: SelectionCounts): string {
+		if (counts.total === 0) return "No file has an applicable decision.";
+		const sides: string[] = [];
+		if (counts.local > 0) sides.push(`Local ${counts.local}`);
+		if (counts.remote > 0) sides.push(`Remote ${counts.remote}`);
+		const deletions = this.deletionList(counts);
+		const summary = `Apply ${fileCount(counts.total)}: ${sides.join(", ")}.`;
+		return deletions.length > 0 ? `${summary} Deletes ${deletions.join(" and ")}.` : summary;
+	}
+
+	private clearBulkNotice(): void {
+		if (!this.bulkNoticeEl) return;
+		this.bulkNoticeEl.setText("");
+	}
+
+	private updateBulkNotice(decision: SupportedDecision, blocked: number, unavailable: number): void {
+		if (!this.bulkNoticeEl) return;
+		const skipped = blocked + unavailable;
+		if (skipped === 0) {
+			this.clearBulkNotice();
+			return;
+		}
+		const reasons: string[] = [];
+		if (blocked > 0) reasons.push(`${blocked} blocked`);
+		if (unavailable > 0) reasons.push(`${unavailable} without a ${DECISION_LABELS[decision]} option`);
+		this.bulkNoticeEl.setText(
+			`Bulk ${DECISION_LABELS[decision]} skipped ${fileCount(skipped)}: ${reasons.join(", ")}.`
+		);
 	}
 
 	private setActive(path: string, moveFocus: boolean, openDiff = false): void {
@@ -454,7 +541,9 @@ export class BatchReviewModal extends Modal {
 
 		if (!change) {
 			host.createEl("p", {
-				text: "Select a file box to view its details.",
+				text: this.changes.length === 0
+					? "This operation has no files to review."
+					: "Select a file row to view its details.",
 				cls: "setting-item-description",
 			});
 			return;
@@ -477,7 +566,7 @@ export class BatchReviewModal extends Modal {
 		if (!this.diffOpen) {
 			const collapsed = host.createDiv({ cls: "sink-review-preview-body" });
 			collapsed.createEl("p", {
-				text: "Open a file box, or focus its name and press Enter, to view the diff.",
+				text: "Open a file row, or focus its name and press Enter, to view the diff.",
 				cls: "sink-review-notice",
 			});
 			return;
@@ -741,21 +830,35 @@ export class BatchReviewModal extends Modal {
 	private setAllSelection(selected: boolean): void {
 		for (const change of this.changes) {
 			const state = this.states.get(change.path) ?? createRowState(change);
-			state.selected = selected;
+			state.selected = selected && !change.blockedReason;
 			this.states.set(change.path, state);
 		}
+		this.clearBulkNotice();
 	}
 
 	private applyDecisionToSelected(decision: SupportedDecision): void {
+		let blocked = 0;
+		let unavailable = 0;
 		for (const change of this.changes) {
 			const state = this.states.get(change.path) ?? createRowState(change);
-			if (!state.selected || change.blockedReason) continue;
-			if (decision === "keep-local" && !canKeepLocal(change)) continue;
-			if (decision === "keep-remote" && !canKeepRemote(change)) continue;
+			if (!state.selected) continue;
+			if (change.blockedReason) {
+				blocked++;
+				continue;
+			}
+			if (decision === "keep-local" && !canKeepLocal(change)) {
+				unavailable++;
+				continue;
+			}
+			if (decision === "keep-remote" && !canKeepRemote(change)) {
+				unavailable++;
+				continue;
+			}
 			setRowDecision(change, state, decision);
 			this.states.set(change.path, state);
 		}
 		this.renderList();
+		this.updateBulkNotice(decision, blocked, unavailable);
 		this.updateActiveConsequence();
 		const active = this.activePath ? this.changesByPath.get(this.activePath) : undefined;
 		if (active) this.syncConflictSelection(active);
@@ -789,7 +892,14 @@ export class BatchReviewModal extends Modal {
 	}
 
 	private applySelected(): void {
-		if (this.resolved || this.submitting || !this.hasEffectiveDecisions()) return;
+		if (this.resolved || this.submitting) return;
+		const counts = this.selectionCounts();
+		if (counts.total === 0) return;
+		const deletions = this.deletionList(counts);
+		if (deletions.length > 0) {
+			const confirmed = window.confirm(`Apply these decisions? This deletes ${deletions.join(" and ")}.`);
+			if (!confirmed) return;
+		}
 		this.submitting = true;
 		for (const button of this.applyButtons) button.disabled = true;
 		this.resolveAndClose({ approved: true, decisions: this.collectDecisions() });

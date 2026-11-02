@@ -43,29 +43,38 @@
   opacity: 0.5;
 }
 
-.sink-floating-status:hover {
-  opacity: 1;
-}
-
-/* Color overrides — remove grayscale and apply status color */
+/* Color overrides: status color with grayscale removed */
 .sink-floating-status div.sink-floating-connected {
   filter: none;
   -webkit-filter: none;
+  opacity: 0.8;
   color: var(--color-green);
 }
 .sink-floating-status div.sink-floating-syncing {
   filter: none;
   -webkit-filter: none;
+  opacity: 0.8;
   color: var(--color-blue);
 }
 .sink-floating-status div.sink-floating-error {
   filter: none;
   -webkit-filter: none;
-  color: var(--text-error);
   opacity: 0.85;
+  color: var(--text-error);
 }
+/* Paused (waiting for review) is a warning, not a disconnected grey */
+.sink-floating-status div.sink-floating-paused {
+  filter: none;
+  -webkit-filter: none;
+  opacity: 0.8;
+  color: var(--text-warning);
+}
+/* Disconnected stays grey and desaturated so it reads as inactive */
 .sink-floating-status div.sink-floating-disconnected {
-  color: var(--text-faint);
+  filter: grayscale(100%);
+  -webkit-filter: grayscale(100%);
+  opacity: 0.65;
+  color: var(--text-muted);
 }
 
 /* --- Status Bar (bottom) --- */
@@ -345,17 +354,6 @@
   letter-spacing: 0.04em;
 }
 
-/* --- Setup Wizard --- */
-.sink-setup-wizard .sink-uri-display {
-  font-family: var(--font-monospace);
-  font-size: var(--font-smaller);
-  padding: 8px;
-  background: var(--background-secondary);
-  border-radius: 4px;
-  word-break: break-all;
-  user-select: all;
-}
-
 /* Progress display during initial sync */
 .sink-progress-count {
   font-size: var(--font-ui-medium);
@@ -571,7 +569,7 @@
 }
 
 .sink-review-decision {
-  max-width: 12em;
+  max-width: 16em;
 }
 
 .sink-review-pager {
@@ -753,6 +751,16 @@
   max-width: 60ch;
 }
 
+.sink-review-bulk-note {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--text-warning);
+}
+
+.sink-review-bulk-note:empty {
+  display: none;
+}
+
 .sink-review-footer-actions {
   display: flex;
   gap: 8px;
@@ -760,6 +768,11 @@
 
 .sink-review-footer-actions button {
   margin: 0;
+}
+
+.sink-diff-view .sink-diff-row:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
 }
 
 .sink-review-workspace button:focus-visible,
@@ -853,11 +866,6 @@
 /* --- Setup Wizard --- */
 .sink-setup-wizard .sink-step {
   margin-bottom: 16px;
-}
-
-.sink-setup-wizard .sink-step-header {
-  font-weight: 600;
-  margin-bottom: 8px;
 }
 
 /* --- Update Notes Modal --- */

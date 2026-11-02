@@ -4,9 +4,9 @@ A minimal self-hosted sync plugin for [Obsidian](https://obsidian.md). Always-on
 
 Forked from the architecture of [obsidian-livesync](https://github.com/vrtmrz/obsidian-livesync), stripped to the essentials.
 
-## Release: 0.2.19
+## Release: 0.2.20
 
-Pauses live replication during retained-conflict reviews so the reviewed revision set stays stable. Includes the 0.2.18 device-history bounds and local PouchDB compaction. See [0.2.19 release notes](docs/releases/0.2.19.md), [0.2.18 notes](docs/releases/0.2.18.md), [0.2.17 notes](docs/releases/0.2.17.md), [0.2.16 notes](docs/releases/0.2.16.md), and [0.2.15 notes](docs/releases/0.2.15.md). Grey-screen crash causality remains unconfirmed; use the [controlled test plan](docs/STABILITY.md) before enabling Sink in a live vault. Development checks require Node.js 22.22.2+ (Node 22 LTS recommended).
+UI clarity and safety improvements across status indicators, review, diffs, settings, setup, and update notes. No sync backend changes. See [0.2.20 release notes](docs/releases/0.2.20.md), [0.2.19 notes](docs/releases/0.2.19.md), [0.2.18 notes](docs/releases/0.2.18.md), [0.2.17 notes](docs/releases/0.2.17.md), [0.2.16 notes](docs/releases/0.2.16.md), and [0.2.15 notes](docs/releases/0.2.15.md). Grey-screen crash causality remains unconfirmed; use the [controlled test plan](docs/STABILITY.md) before enabling Sink in a live vault. Development checks require Node.js 22.22.2+ (Node 22 LTS recommended).
 
 ---
 

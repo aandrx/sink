@@ -8,6 +8,16 @@ interface ReleaseNote {
 
 const LATEST_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.2.20",
+    title: "UI Clarity and Safety",
+    points: [
+      "Status text now says Connected, Syncing, Review, Blocked, or Disconnected instead of Full, Flowing, Holding, or Empty.",
+      "The review footer summarizes effective Local/Remote changes and confirms destructive deletions. Blocked rows are excluded from selection counts, and bulk skips are explained.",
+      "The diff starts collapsed, file rows open on click, and keyboard focus is retained when expanding folded context.",
+      "Settings, setup, and update-notes copy now explain credential exposure, destructive actions, partial failures, and snapshot terminology.",
+    ],
+  },
+  {
     version: "0.2.19",
     title: "Stable Conflict Resolution",
     points: [
@@ -123,9 +133,12 @@ export class UpdateNotesModal extends Modal {
       text: firstInstall ? "Welcome to Sink" : `Sink updated to ${this.currentVersion}`,
     });
 
+    const latest = this.findNote(this.currentVersion);
     if (firstInstall) {
       contentEl.createEl("p", {
-        text: "You are on the latest Sink build. Here is what is currently included:",
+        text: latest
+          ? "You are on the latest Sink build. Here is what is currently included:"
+          : "Welcome to Sink.",
         cls: "setting-item-description",
       });
     } else {
@@ -134,23 +147,31 @@ export class UpdateNotesModal extends Modal {
         cls: "setting-item-description",
       });
     }
+    if (latest) {
+      contentEl.createEl("h3", { text: `${latest.version} - ${latest.title}` });
 
-    const latest = this.selectLatestNote(this.currentVersion);
-    contentEl.createEl("h3", { text: `${latest.version} - ${latest.title}` });
-
-    const list = contentEl.createEl("ul", { cls: "sink-update-notes-list" });
-    for (const point of latest.points) {
-      list.createEl("li", { text: point });
+      const list = contentEl.createEl("ul", { cls: "sink-update-notes-list" });
+      for (const point of latest.points) {
+        list.createEl("li", { text: point });
+      }
+    } else {
+      contentEl.createEl("p", {
+        text: `Release notes for ${this.currentVersion} are not available in this build.`,
+        cls: "setting-item-description",
+      });
     }
 
-    const previousNotes = contentEl.createEl("details", { cls: "sink-update-notes-history" });
-    previousNotes.createEl("summary", { text: "See recent updates" });
-    for (const note of LATEST_RELEASE_NOTES) {
-      const block = previousNotes.createDiv({ cls: "sink-update-note-block" });
-      block.createEl("h4", { text: `${note.version} - ${note.title}` });
-      const items = block.createEl("ul");
-      for (const point of note.points) {
-        items.createEl("li", { text: point });
+    const previousNotes = LATEST_RELEASE_NOTES.filter((note) => note.version !== this.currentVersion);
+    if (previousNotes.length > 0) {
+      const history = contentEl.createEl("details", { cls: "sink-update-notes-history" });
+      history.createEl("summary", { text: "See recent updates" });
+      for (const note of previousNotes) {
+        const block = history.createDiv({ cls: "sink-update-note-block" });
+        block.createEl("h4", { text: `${note.version} - ${note.title}` });
+        const items = block.createEl("ul");
+        for (const point of note.points) {
+          items.createEl("li", { text: point });
+        }
       }
     }
 
@@ -166,9 +187,7 @@ export class UpdateNotesModal extends Modal {
     this.contentEl.empty();
   }
 
-  private selectLatestNote(version: string): ReleaseNote {
-    const exact = LATEST_RELEASE_NOTES.find((entry) => entry.version === version);
-    if (exact) return exact;
-    return LATEST_RELEASE_NOTES[0];
+  private findNote(version: string): ReleaseNote | undefined {
+    return LATEST_RELEASE_NOTES.find((entry) => entry.version === version);
   }
 }

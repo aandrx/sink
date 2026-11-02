@@ -14,6 +14,10 @@ const nodeRequire = createRequire(import.meta.url);
 const cache = new Map();
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { pretendToBeVisual: true });
 const { window } = dom;
+// The UI code reads window.confirm at apply time. Destructive applies ask for
+// confirmation; tests default to accepting and stub refusals per case.
+globalThis.window = window;
+window.confirm = () => true;
 const { document, HTMLElement } = window;
 const proto = HTMLElement.prototype;
 
@@ -76,6 +80,7 @@ function loadTS(relative) {
 
 const { BatchReviewModal } = loadTS("src/ui/BatchReviewModal.ts");
 const { ConflictModal } = loadTS("src/ui/ConflictModal.ts");
+const { renderSplitDiff } = loadTS("src/ui/DiffView.ts");
 
 const app = new App();
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -140,7 +145,7 @@ test("paged file list caps DOM rows and keeps selection and decisions across pag
   const firstRow = rows(modal)[0];
   setCheckbox(firstRow.querySelector(".sink-review-file-select"), false);
   choose(firstRow.querySelector(".sink-review-decision"), "keep-local");
-  assert.match(modal.contentEl.querySelector(".sink-review-selection-count").textContent, /119 of 120 selected/);
+  assert.match(modal.contentEl.querySelector(".sink-review-selection-count").textContent, /119 of 120 applicable/);
 
   const list = modal.contentEl.querySelector(".sink-review-file-list");
   list.scrollTop = 42;
@@ -193,10 +198,10 @@ test("cancel resolves false exactly once", () => {
   assert.deepEqual(results[0], { approved: false, decisions: [] });
 });
 
-test("the diff starts closed and clicking anywhere in a file box opens it", async () => {
+test("the diff starts closed and clicking anywhere in a file row opens it", async () => {
   const first = change("closed.md");
   const { modal } = openBatch([first]);
-  assert.match(modal.contentEl.querySelector(".sink-review-preview-content").textContent, /Open a file box/);
+  assert.match(modal.contentEl.querySelector(".sink-review-preview-content").textContent, /Open a file row/);
   assert.equal(modal.contentEl.querySelectorAll(".sink-diff-pane").length, 0);
 
   const row = rows(modal)[0];
@@ -235,7 +240,7 @@ test("apply is disabled and explained when nothing effective is selected", () =>
   const previous = buttonByText(modal.contentEl, "Previous");
   assert.equal(previous.disabled, true);
   assert.equal(window.getComputedStyle(previous).opacity, "0.5");
-  assert.match(modal.contentEl.querySelector(".sink-review-footer-note").textContent, /Nothing selected/);
+  assert.match(modal.contentEl.querySelector(".sink-review-footer-note").textContent, /No file has an applicable decision/);
   apply.click();
   assert.equal(results.length, 0);
 
@@ -350,7 +355,7 @@ test("merge is never offered or emitted without a true common ancestor", () => {
 
   const apply = buttonByText(modal.contentEl, "Apply selected");
   assert.equal(apply.disabled, true);
-  assert.match(modal.contentEl.querySelector(".sink-review-footer-note").textContent, /Nothing selected/);
+  assert.match(modal.contentEl.querySelector(".sink-review-footer-note").textContent, /No file has an applicable decision/);
   apply.click();
   assert.equal(results.length, 0);
 
@@ -375,6 +380,8 @@ test("conflict modal uses this-device and server sides with real choices only", 
 
   const keepThisDevice = modal.contentEl.querySelector(".sink-conflict-choice-mine");
   const keepServer = modal.contentEl.querySelector(".sink-conflict-choice-theirs");
+  assert.equal(keepServer.classList.contains("mod-cta"), false);
+  assert.equal(document.activeElement, keepThisDevice);
   keepThisDevice.click();
   keepServer.click();
   assert.deepEqual(choices, ["mine"]);
@@ -386,23 +393,140 @@ test("conflict modal can leave both unchanged without a callback", () => {
   modal.open();
   const leave = modal.contentEl.querySelector(".sink-conflict-choice-leave");
   assert.ok(leave);
-  assert.equal(leave.textContent, "Leave both unchanged");
+  assert.equal(leave.textContent, "Leave both as they are");
   leave.click();
   assert.deepEqual(choices, []);
   assert.equal(modal.contentEl.textContent, "");
 });
 
-test("blocked database revisions remain visible without offering a false resolution", () => {
+test("blocked database revisions start unselected, report a blocked count, and are never applied", () => {
   const { modal, results } = openBatch([change("blocked.md", { blockedReason: "Blocked: retained database revisions require resolution." })]);
   assert.match(modal.contentEl.textContent, /Blocked: retained database revisions/);
   assert.equal(modal.contentEl.querySelector(".sink-review-decision").disabled, true);
-  assert.equal(modal.contentEl.querySelector(".sink-review-file-select").disabled, true);
+  const checkbox = modal.contentEl.querySelector(".sink-review-file-select");
+  assert.equal(checkbox.disabled, true);
+  assert.equal(checkbox.checked, false);
+  const summary = modal.contentEl.querySelector(".sink-review-selection-count").textContent;
+  assert.match(summary, /0 of 0 applicable/);
+  assert.match(summary, /1 blocked/);
+  assert.match(modal.contentEl.querySelector(".sink-review-footer-note").textContent, /No file has an applicable decision/);
+
+  buttonByText(modal.contentEl, "Select all").click();
+  assert.equal(modal.contentEl.querySelector(".sink-review-file-select").checked, false);
+  assert.match(modal.contentEl.querySelector(".sink-review-selection-count").textContent, /0 of 0 applicable/);
+
   const bulk = modal.contentEl.querySelector(".sink-review-bulk-select");
   bulk.value = "keep-remote";
   bulk.dispatchEvent(event("change"));
   assert.equal(modal.contentEl.querySelector(".sink-review-apply").disabled, true);
   assert.deepEqual(results, []);
   modal.close();
+});
+
+test("bulk decisions report the selected files they had to skip and why", () => {
+  const available = change("available.md");
+  const blocked = change("blocked.md", { blockedReason: "Blocked: retained database revisions require resolution." });
+  const bothMissing = change("both-missing.md", {
+    remoteExists: false,
+    localExists: false,
+    localContent: undefined,
+    localMtime: undefined,
+    remoteContent: undefined,
+    remoteDeleted: false,
+    suggested: "keep-local",
+  });
+  const { modal } = openBatch([available, blocked, bothMissing]);
+  assert.match(modal.contentEl.querySelector(".sink-review-selection-count").textContent, /2 selected • 1 applicable/);
+
+  choose(modal.contentEl.querySelector(".sink-review-bulk-select"), "keep-local");
+  const notice = modal.contentEl.querySelector(".sink-review-bulk-note");
+  assert.equal(notice.hidden, false);
+  assert.match(notice.textContent, /Bulk Local skipped 1 file/);
+  assert.match(notice.textContent, /1 without a Local option/);
+  assert.equal(rows(modal)[0].querySelector(".sink-review-decision").value, "keep-local");
+  assert.equal(rows(modal)[1].querySelector(".sink-review-decision").value, "skip");
+  assert.equal(rows(modal)[2].querySelector(".sink-review-decision").value, "skip");
+
+  setCheckbox(rows(modal)[0].querySelector(".sink-review-file-select"), false);
+  assert.equal(notice.hidden, false);
+  assert.equal(notice.textContent, "");
+});
+
+test("apply footer summarizes effective sides and deletions", () => {
+  const publish = change("publish.md");
+  const adopt = change("adopt.md");
+  const { modal } = openBatch([publish, adopt]);
+  choose(rows(modal)[0].querySelector(".sink-review-decision"), "keep-local");
+  choose(rows(modal)[1].querySelector(".sink-review-decision"), "keep-remote");
+  const note = modal.contentEl.querySelector(".sink-review-footer-note").textContent;
+  assert.match(note, /Apply 2 files: Local 1, Remote 1/);
+  assert.equal(note.includes("Deletes"), false);
+});
+
+test("only destructive applies ask for confirmation and a refusal applies nothing", () => {
+  const remoteOnly = change("remote-only.md", {
+    localExists: false,
+    localContent: undefined,
+    localMtime: undefined,
+    suggested: "keep-remote",
+  });
+  const { modal, results } = openBatch([remoteOnly]);
+  choose(rows(modal)[0].querySelector(".sink-review-decision"), "keep-local");
+  assert.match(modal.contentEl.querySelector(".sink-review-footer-note").textContent, /Deletes 1 file in the database \(Local\)/);
+
+  const calls = [];
+  const original = window.confirm;
+  window.confirm = (message) => { calls.push(message); return false; };
+  try {
+    buttonByText(modal.contentEl, "Apply selected").click();
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /deletes 1 file in the database \(Local\)/);
+    assert.deepEqual(results, []);
+
+    window.confirm = (message) => { calls.push(message); return true; };
+    buttonByText(modal.contentEl, "Apply selected").click();
+    assert.equal(results.length, 1);
+    assert.equal(results[0].approved, true);
+  } finally {
+    window.confirm = original;
+  }
+});
+
+test("remote deletions are summarized and confirmed too", () => {
+  const deleted = change("deleted.md", {
+    remoteDeleted: true,
+    suggested: "keep-remote",
+  });
+  const { modal, results } = openBatch([deleted]);
+  choose(rows(modal)[0].querySelector(".sink-review-decision"), "keep-remote");
+  assert.match(modal.contentEl.querySelector(".sink-review-footer-note").textContent, /Deletes 1 file in this vault \(Remote\)/);
+
+  const original = window.confirm;
+  let calls = 0;
+  window.confirm = () => { calls++; return false; };
+  try {
+    buttonByText(modal.contentEl, "Apply selected").click();
+    assert.equal(calls, 1);
+    assert.deepEqual(results, []);
+  } finally {
+    window.confirm = original;
+  }
+});
+
+test("opening a file name keeps focus on the row and Escape restores it from the preview", () => {
+  const { modal } = openBatch([change("focus.md")]);
+  const pathButton = buttonByText(modal.contentEl, "focus.md");
+  const previewHeading = () => modal.contentEl.querySelector(".sink-review-preview-header h3");
+
+  pathButton.click();
+  assert.equal(modal.contentEl.querySelectorAll(".sink-diff-pane").length, 2);
+  assert.notEqual(document.activeElement, previewHeading());
+
+  const scroll = modal.contentEl.querySelector(".sink-diff-scroll");
+  scroll.focus();
+  assert.equal(document.activeElement, scroll);
+  scroll.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(document.activeElement, pathButton);
 });
 
 test("conflict modal can choose the server side once", () => {
@@ -788,7 +912,79 @@ test("a deleted server version without a local file still disables keep-local", 
   const select = modal.contentEl.querySelector(".sink-review-decision");
   const keepLocal = [...select.querySelectorAll("option")].find((option) => option.value === "keep-local");
   assert.equal(keepLocal.disabled, true);
-  assert.equal(keepLocal.textContent, "Local (unavailable)");
+  assert.equal(keepLocal.textContent, "Local (absent)");
   choose(select, "keep-remote");
   assert.match(modal.contentEl.querySelector(".sink-review-consequence").textContent, /deletes this file in the local vault/);
+});
+
+test("conflict modal retry names the remote revision load", async () => {
+  const modal = new ConflictModal(
+    app,
+    "retry.md",
+    "local",
+    "server",
+    () => {},
+    {
+      conflictRevisions: [revision("2-winner")],
+      conflictRevision: "2-winner",
+      loadConflictPreview: () => Promise.reject(new Error("revision boom")),
+    }
+  );
+  modal.open();
+  await settle();
+  const preview = modal.contentEl.querySelector(".sink-conflict-preview");
+  assert.match(preview.textContent, /Remote revision could not be loaded: revision boom/);
+  const retry = buttonByText(preview, "Retry loading remote revision");
+  assert.ok(retry);
+  assert.equal(buttonByText(preview, "Retry server revision"), undefined);
+});
+
+function diffHarness(leftText, rightText) {
+  const container = document.createElement("div");
+  document.body.append(container);
+  renderSplitDiff(container, "Local", "Remote", leftText, rightText);
+  return container;
+}
+
+test("diff navigation reports 'Change 1 of 2' style positions", () => {
+  const original = Array.from({ length: 40 }, (_, index) => `line ${index}`);
+  const changed = [...original];
+  changed[10] = "first edit";
+  changed[30] = "second edit";
+  const container = diffHarness(original.join("\n"), changed.join("\n"));
+  try {
+    const next = container.querySelector('[aria-label="Next change"]');
+    const previous = container.querySelector('[aria-label="Previous change"]');
+    const position = container.querySelector(".sink-diff-position");
+    next.click();
+    assert.equal(position.textContent, "Change 1 of 2");
+    next.click();
+    assert.equal(position.textContent, "Change 2 of 2");
+    previous.click();
+    assert.equal(position.textContent, "Change 1 of 2");
+  } finally {
+    container.remove();
+  }
+});
+
+test("fold labels have no em dash and expanding restores focus to the first revealed row", () => {
+  const original = Array.from({ length: 40 }, (_, index) => `line ${index}`);
+  const changed = [...original];
+  changed[10] = "first edit";
+  changed[30] = "second edit";
+  const container = diffHarness(original.join("\n"), changed.join("\n"));
+  try {
+    const fold = container.querySelector(".sink-diff-left .sink-diff-fold");
+    assert.match(fold.textContent, /unchanged lines, expand/);
+    assert.equal(fold.textContent.includes("—"), false);
+    fold.click();
+
+    const focused = document.activeElement;
+    const leftPane = container.querySelector(".sink-diff-left");
+    assert.ok(leftPane.contains(focused));
+    assert.equal(focused.classList.contains("sink-diff-row"), true);
+    assert.match(focused.textContent, /line 3/);
+  } finally {
+    container.remove();
+  }
 });

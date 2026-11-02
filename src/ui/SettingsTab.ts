@@ -9,6 +9,9 @@ import { SetupWizard } from "./SetupWizard";
 export class SinkSettingsTab extends PluginSettingTab {
   plugin: SinkPlugin;
   private snapshotRenderGeneration = 0;
+  private roleDropdown: DropdownComponent | null = null;
+  private devicesContainer: HTMLElement | null = null;
+  private devicesInfoEl: HTMLElement | null = null;
 
   constructor(app: App, plugin: SinkPlugin) {
     super(app, plugin);
@@ -19,6 +22,7 @@ export class SinkSettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("sink-settings-root");
+    this.roleDropdown = null;
 
     containerEl.createEl("h1", { text: "Sink" });
     containerEl.createEl("p", {
@@ -31,10 +35,10 @@ export class SinkSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Server URL")
-      .setDesc("CouchDB address (e.g., http://100.64.0.1:5984)")
+      .setDesc("CouchDB address (e.g., http://100.64.0.1:5985)")
       .addText((text) =>
         text
-          .setPlaceholder("http://your-server:5984")
+          .setPlaceholder("http://your-server:5985")
           .setValue(this.plugin.settings.serverUrl)
           .onChange(async (value) => {
             this.plugin.settings.serverUrl = value.trim();
@@ -81,17 +85,17 @@ export class SinkSettingsTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Apply connection settings")
-      .setDesc("Save these connection details and restart sync explicitly. Changes do not restart a running sync on their own.")
+      .setName("Connection settings")
+      .setDesc("These fields save automatically. Restart sync with these settings to apply them to a running sync engine.")
       .addButton((btn) =>
-        btn.setButtonText("Save and reconnect").setCta().onClick(async () => {
+        btn.setButtonText("Restart sync with these settings").setCta().onClick(async () => {
           await this.plugin.saveSettings();
           if (this.plugin.getSyncEngine() || this.plugin.settings.isConfigured) {
-            new Notice("Sink: Applying connection settings...");
+            new Notice("Sink: Restarting sync with these settings...");
             await this.plugin.startSync();
-            if (this.plugin.getSyncEngine()) new Notice("Sink: Connection settings applied");
+            if (this.plugin.getSyncEngine()) new Notice("Sink: Sync restarted with these settings");
           } else {
-            new Notice("Sink: Connection settings saved");
+            new Notice("Sink: Connection settings saved. Sync is not running.");
           }
         })
       );
@@ -101,16 +105,23 @@ export class SinkSettingsTab extends PluginSettingTab {
       .setDesc("Verify the server is reachable and credentials work")
       .addButton((btn) =>
         btn.setButtonText("Test").onClick(async () => {
-          const engine = this.plugin.getSyncEngine();
-          if (engine) {
-            const result = await engine.testConnection();
-            new Notice(result.success ? `✓ ${result.message}` : `✗ ${result.message}`);
-          } else {
-            // Create a temporary engine to test
-            const { RemoteDB } = await import("../sync/RemoteDB");
-            const remote = new RemoteDB(this.plugin.settings);
-            const result = await remote.testConnection();
-            new Notice(result.success ? `✓ ${result.message}` : `✗ ${result.message}`);
+          btn.setDisabled(true);
+          btn.setButtonText("Testing...");
+          try {
+            const engine = this.plugin.getSyncEngine();
+            if (engine) {
+              const result = await engine.testConnection();
+              new Notice(result.success ? `✓ ${result.message}` : `✗ ${result.message}`);
+            } else {
+              // Create a temporary engine to test
+              const { RemoteDB } = await import("../sync/RemoteDB");
+              const remote = new RemoteDB(this.plugin.settings);
+              const result = await remote.testConnection();
+              new Notice(result.success ? `✓ ${result.message}` : `✗ ${result.message}`);
+            }
+          } finally {
+            btn.setDisabled(false);
+            btn.setButtonText("Test");
           }
         })
       );
@@ -214,11 +225,17 @@ export class SinkSettingsTab extends PluginSettingTab {
           })
       );
 
+    const roleEngine = this.plugin.getSyncEngine();
     const roleSetting = new Setting(containerEl)
       .setName("This device role")
-      .setDesc("Primary devices can upload immediately. Secondary devices must confirm before uploading changes.");
+      .setDesc(
+        roleEngine
+          ? "Primary devices can upload immediately. Secondary devices must confirm before uploading changes."
+          : "Start sync on this device to change its role."
+      );
 
     roleSetting.addDropdown((dropdown) => {
+      this.roleDropdown = dropdown;
       dropdown
         .addOption("primary", "Primary")
         .addOption("secondary", "Secondary")
@@ -228,9 +245,14 @@ export class SinkSettingsTab extends PluginSettingTab {
 
           await engine.setDeviceRole(this.plugin.settings.deviceId, value as DeviceRole);
           await this.plugin.refreshRibbonState();
-          new Notice(`Device role set to ${value}`);
-          this.display();
+          new Notice(`Device role set to ${this.formatRole(value as DeviceRole)}`);
+          await this.refreshDeviceList();
         });
+
+      if (!roleEngine) {
+        dropdown.setDisabled(true);
+        dropdown.selectEl.title = "Start sync on this device to change the role.";
+      }
 
       void this.populateCurrentRole(dropdown);
     });
@@ -241,6 +263,8 @@ export class SinkSettingsTab extends PluginSettingTab {
       cls: "setting-item-description",
     });
     const devicesContainer = containerEl.createDiv();
+    this.devicesContainer = devicesContainer;
+    this.devicesInfoEl = devicesInfo;
 
     new Setting(containerEl)
       .setName("Refresh device list")
@@ -253,19 +277,24 @@ export class SinkSettingsTab extends PluginSettingTab {
 
     void this.renderKnownDevices(devicesContainer, devicesInfo, false);
 
-    containerEl.createEl("h2", { text: "Backups" });
+    containerEl.createEl("h2", { text: "Snapshots" });
     const backupInfo = containerEl.createEl("p", {
-      text: "Select a snapshot to review its changed files, then click a file to inspect the diff.",
+      text: "Select a snapshot to review its changed files, then select a file to inspect the diff.",
       cls: "setting-item-description",
     });
     const backupContainer = containerEl.createDiv();
 
     new Setting(containerEl)
       .setName("Refresh snapshots")
-      .setDesc("Show recent restore points")
+      .setDesc("Show recent snapshots")
       .addButton((btn) =>
         btn.setButtonText("Refresh").onClick(async () => {
-          await this.renderSnapshots(backupContainer, backupInfo);
+          btn.setDisabled(true);
+          try {
+            await this.renderSnapshots(backupContainer, backupInfo);
+          } finally {
+            btn.setDisabled(false);
+          }
         })
       );
 
@@ -276,18 +305,18 @@ export class SinkSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Generate setup URI")
-      .setDesc("Copy a URI to quickly set up Sink on another device")
+      .setDesc("Copy a URI to set up Sink on another device. The URI contains your password and encryption passphrase in readable form; store it securely.")
       .addButton((btn) =>
         btn.setButtonText("Copy URI").onClick(async () => {
           const uri = await generateSetupURI(this.plugin.settings);
           await navigator.clipboard.writeText(uri);
-          new Notice("Setup URI copied to clipboard!");
+          new Notice("Setup URI copied. It contains your password and passphrase in readable form; store it securely.");
         })
       );
 
     new Setting(containerEl)
       .setName("Run setup wizard")
-      .setDesc("Re-run the initial setup (push/pull/merge options)")
+      .setDesc("Re-run the initial setup and choose a sync direction.")
       .addButton((btn) =>
         btn.setButtonText("Setup").onClick(() => {
           new SetupWizard(this.app, this.plugin, "manual").open();
@@ -296,17 +325,35 @@ export class SinkSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Rebuild local database")
-      .setDesc("Destroy and recreate the local sync database. Use if sync is broken.")
+      .setDesc("Destroy and recreate the local sync database. Use only if sync is broken. Back up the vault first; the local database cannot be recovered.")
       .addButton((btn) =>
         btn.setButtonText("Rebuild").setWarning().onClick(async () => {
           const engine = this.plugin.getSyncEngine();
-          if (engine) {
-            await engine.destroyLocalDB();
-            new Notice("Local database destroyed. Restarting sync...");
-            await this.plugin.startSync();
+          if (!engine) {
+            new Notice("Sink: Start sync before rebuilding the local database.");
+            return;
           }
+
+          const ok = window.confirm(
+            "Rebuild the local sync database? This destroys the local database and cannot be undone. Back up the vault before continuing."
+          );
+          if (!ok) return;
+
+          await engine.destroyLocalDB();
+          new Notice("Local database destroyed. Restarting sync...");
+          await this.plugin.startSync();
         })
       );
+  }
+
+  private async refreshDeviceList(): Promise<void> {
+    if (!this.devicesContainer || !this.devicesInfoEl) return;
+    await this.renderKnownDevices(this.devicesContainer, this.devicesInfoEl, false);
+    if (this.roleDropdown) await this.populateCurrentRole(this.roleDropdown);
+  }
+
+  private formatRole(role: DeviceRole): string {
+    return role === "primary" ? "Primary" : "Secondary";
   }
 
   private async populateCurrentRole(dropdown: DropdownComponent): Promise<void> {
@@ -340,14 +387,14 @@ export class SinkSettingsTab extends PluginSettingTab {
   private renderDeviceRow(container: HTMLElement, engine: SyncEngine, device: KnownDevice): void {
     const status = device.isActive ? "active" : "stale";
     const current = device.isCurrentDevice ? "This device" : "Remote device";
-    const version = device.pluginVersion ?? "unknown";
+    const versionLabel = device.pluginVersion?.trim() ? `v${device.pluginVersion.trim()}` : "version unknown";
     const lastSeen = this.formatTimestamp(device.lastSeen);
     const lastPush = this.formatTimestamp(device.lastPushAt);
     const lastPull = this.formatTimestamp(device.lastPullAt);
 
     new Setting(container)
-      .setName(`${device.deviceName} (${device.role})`)
-      .setDesc(`${current} • v${version} • ${status} • last seen ${lastSeen} • last push ${lastPush} • last pull ${lastPull}`)
+      .setName(`${device.deviceName} (${this.formatRole(device.role)})`)
+      .setDesc(`${current} • ${versionLabel} • ${status} • last seen ${lastSeen} • last push ${lastPush} • last pull ${lastPull}`)
       .addButton((btn) =>
         btn
           .setButtonText("Primary")
@@ -357,8 +404,8 @@ export class SinkSettingsTab extends PluginSettingTab {
             if (device.isCurrentDevice) {
               await this.plugin.refreshRibbonState();
             }
-            new Notice(`${device.deviceName} marked primary`);
-            this.display();
+            new Notice(`${device.deviceName} marked ${this.formatRole("primary")}`);
+            await this.refreshDeviceList();
           })
       )
       .addButton((btn) =>
@@ -370,14 +417,19 @@ export class SinkSettingsTab extends PluginSettingTab {
             if (device.isCurrentDevice) {
               await this.plugin.refreshRibbonState();
             }
-            new Notice(`${device.deviceName} marked secondary`);
-            this.display();
+            new Notice(`${device.deviceName} marked ${this.formatRole("secondary")}`);
+            await this.refreshDeviceList();
           })
       )
       .addButton((btn) =>
         btn
           .setButtonText("Remove")
           .setDisabled(device.isCurrentDevice)
+          .setTooltip(
+            device.isCurrentDevice
+              ? "The current device cannot be removed from the known devices list."
+              : "Remove this device from the known devices list."
+          )
           .setWarning()
           .onClick(async () => {
             const ok = window.confirm(`Remove ${device.deviceName} from the known devices list?`);
@@ -395,7 +447,7 @@ export class SinkSettingsTab extends PluginSettingTab {
     container.empty();
     const engine = this.plugin.getSyncEngine();
     if (!engine) {
-      infoEl.setText("Start sync on this device to view restore points.");
+      infoEl.setText("Start sync on this device to view snapshots.");
       return;
     }
 
@@ -403,15 +455,14 @@ export class SinkSettingsTab extends PluginSettingTab {
       const snapshots = await engine.listSnapshots(15);
       if (renderGeneration !== this.snapshotRenderGeneration) return;
       if (snapshots.length === 0) {
-        infoEl.setText("No restore points found yet.");
+        infoEl.setText("No snapshots found yet.");
         return;
       }
 
-      infoEl.setText("Restore points are local safety snapshots taken before risky batches are applied.");
+      infoEl.setText("Snapshots are local safety copies taken before risky batches are applied.");
 
       const selectorRow = container.createDiv({ cls: "sink-snapshot-selector-row" });
       const select = selectorRow.createEl("select", { cls: "sink-snapshot-select" });
-      const refreshBtn = selectorRow.createEl("button", { text: "Refresh", cls: "mod-cta" });
       const restoreBtn = selectorRow.createEl("button", { text: "Restore snapshot" });
 
       const snapshotDetails = container.createDiv({ cls: "sink-snapshot-details" });
@@ -455,16 +506,12 @@ export class SinkSettingsTab extends PluginSettingTab {
         } catch (error) {
           if (!isCurrent()) return;
           snapshotDetails.empty();
-          this.renderSnapshotError(snapshotDetails, error, "Could not load this restore point");
+          this.renderSnapshotError(snapshotDetails, error, "Could not load this snapshot");
         }
       };
 
       select.addEventListener("change", () => {
         void renderSelected(select.value);
-      });
-
-      refreshBtn.addEventListener("click", () => {
-        void this.renderSnapshots(container, infoEl);
       });
 
       restoreBtn.addEventListener("click", async () => {
@@ -477,7 +524,13 @@ export class SinkSettingsTab extends PluginSettingTab {
         restoreBtn.disabled = true;
         try {
           const restored = await engine.restoreSnapshot(snapshot.id);
-          new Notice(`Sink: Restored ${restored} files from snapshot`);
+          if (restored < snapshot.fileCount) {
+            new Notice(
+              `Sink: Restored ${restored} of ${snapshot.fileCount} snapshot files. Some files were skipped; review the vault before retrying.`
+            );
+          } else {
+            new Notice(`Sink: Restored ${restored} files from snapshot`);
+          }
         } catch (error) {
           const detail = error instanceof Error && error.message ? `: ${error.message}` : "";
           const message = `Restore did not complete${detail}. Some files may already have been restored; review the vault before retrying.`;
@@ -493,8 +546,8 @@ export class SinkSettingsTab extends PluginSettingTab {
     } catch (error) {
       if (renderGeneration !== this.snapshotRenderGeneration) return;
       container.empty();
-      infoEl.setText("Restore points could not be loaded.");
-      this.renderSnapshotError(container, error, "Could not load restore points");
+      infoEl.setText("Snapshots could not be loaded.");
+      this.renderSnapshotError(container, error, "Could not load snapshots");
     }
   }
 

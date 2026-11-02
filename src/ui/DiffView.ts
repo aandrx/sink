@@ -200,8 +200,11 @@ export function renderSplitDiff(container: HTMLElement, leftLabel: string, right
   right.scroll.addEventListener("scroll", () => syncScroll(right.scroll, left.scroll), { passive: true });
 
   const changes = rows.map((row, index) => row.kind !== "equal" && (index === 0 || rows[index - 1].kind === "equal") ? index : -1).filter((index) => index >= 0);
+  // Set membership keeps the per-row check constant time in large diffs.
+  const changeIndexes = new Set(changes);
   const expanded = new Set<number>();
   const changeElements = new Map<number, [HTMLElement, HTMLElement]>();
+  const lineElements = new Map<number, [HTMLElement, HTMLElement]>();
   let showAll = false;
   let activeChange = -1;
   previous.disabled = next.disabled = changes.length === 0;
@@ -213,6 +216,8 @@ export function renderSplitDiff(container: HTMLElement, leftLabel: string, right
     const segments = side === "left" ? row.leftSegments : row.rightSegments;
     const kind = number === undefined ? "spacer" : row.kind === "equal" ? "equal" : side === "left" ? "delete" : "insert";
     const line = body.createDiv({ cls: `sink-diff-row sink-diff-${kind}` });
+    // Programmatic focus target after folds expand; not a tab stop.
+    line.tabIndex = -1;
     const gutter = line.createDiv({ cls: "sink-diff-gutter" });
     gutter.setAttribute("aria-hidden", "true");
     gutter.createSpan({ cls: "sink-diff-line-number", text: number ?? "" });
@@ -224,22 +229,28 @@ export function renderSplitDiff(container: HTMLElement, leftLabel: string, right
     return line;
   };
 
-  const renderRows = () => {
+  const renderRows = (focusTarget?: { index: number; side: "left" | "right" }) => {
     const scrollTop = left.scroll.scrollTop;
     left.body.empty();
     right.body.empty();
     left.body.style.width = right.body.style.width = "";
     changeElements.clear();
+    lineElements.clear();
     for (const entry of buildDiffDisplayRows(rows, expanded, showAll)) {
       if (entry.kind === "fold") {
-        for (const body of [left.body, right.body]) {
-          const fold = body.createEl("button", { cls: "sink-diff-fold", text: `··· ${entry.count} unchanged lines — expand` });
+        for (const side of ["left", "right"] as const) {
+          const body = side === "left" ? left.body : right.body;
+          const fold = body.createEl("button", { cls: "sink-diff-fold", text: `··· ${entry.count} unchanged lines, expand` });
           fold.setAttribute("aria-expanded", "false");
-          fold.addEventListener("click", () => { expanded.add(entry.start); renderRows(); });
+          fold.addEventListener("click", () => {
+            expanded.add(entry.start);
+            renderRows({ index: entry.start, side });
+          });
         }
       } else {
         const pair: [HTMLElement, HTMLElement] = [renderLine(left.body, entry.row, "left"), renderLine(right.body, entry.row, "right")];
-        if (changes.includes(entry.index)) changeElements.set(entry.index, pair);
+        lineElements.set(entry.index, pair);
+        if (changeIndexes.has(entry.index)) changeElements.set(entry.index, pair);
         if (entry.index === changes[activeChange]) pair.forEach((line) => line.addClass("sink-diff-current-change"));
       }
     }
@@ -247,6 +258,12 @@ export function renderSplitDiff(container: HTMLElement, leftLabel: string, right
     // A hidden modal has no layout yet; use a conservative ch-based width there.
     left.body.style.width = right.body.style.width = measuredWidth ? `${measuredWidth}px` : width;
     left.scroll.scrollTop = right.scroll.scrollTop = scrollTop;
+    if (focusTarget) {
+      const revealed = lineElements.get(focusTarget.index);
+      const target = revealed?.[focusTarget.side === "left" ? 0 : 1]
+        ?? (focusTarget.side === "left" ? left.scroll : right.scroll);
+      target.focus();
+    }
   };
 
   contextButton.addEventListener("click", () => {
@@ -263,7 +280,7 @@ export function renderSplitDiff(container: HTMLElement, leftLabel: string, right
     const pair = changeElements.get(changes[activeChange]);
     pair?.forEach((line) => line.addClass("sink-diff-current-change"));
     if (pair) left.scroll.scrollTop = right.scroll.scrollTop = Math.max(0, pair[0].offsetTop - 24);
-    position.setText(`${activeChange + 1} / ${changes.length} changes`);
+    position.setText(`Change ${activeChange + 1} of ${changes.length}`);
   };
   previous.addEventListener("click", () => navigate(-1));
   next.addEventListener("click", () => navigate(1));

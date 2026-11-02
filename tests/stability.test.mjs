@@ -681,11 +681,11 @@ test("context expansion and next/previous navigation update both panes", () => {
     const next = container.querySelector('[aria-label="Next change"]');
     next.click();
     assert.equal(container.querySelectorAll(".sink-diff-current-change").length, 2);
-    assert.equal(container.querySelector(".sink-diff-position").textContent, "1 / 2 changes");
+    assert.equal(container.querySelector(".sink-diff-position").textContent, "Change 1 of 2");
     next.click();
-    assert.equal(container.querySelector(".sink-diff-position").textContent, "2 / 2 changes");
+    assert.equal(container.querySelector(".sink-diff-position").textContent, "Change 2 of 2");
     container.querySelector('[aria-label="Previous change"]').click();
-    assert.equal(container.querySelector(".sink-diff-position").textContent, "1 / 2 changes");
+    assert.equal(container.querySelector(".sink-diff-position").textContent, "Change 1 of 2");
   } finally { dom.window.close(); }
 });
 

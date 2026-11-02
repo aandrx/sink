@@ -27,7 +27,7 @@ function describeError(e: any): string {
     msg.toLowerCase().includes("econnrefused") ||
     msg.toLowerCase().includes("enotfound")
   ) {
-    return "Cannot reach server — verify the URL is correct, the server is running, and Tailscale is connected on this device.";
+    return "Cannot reach server. Check the URL, whether the server is running, and whether any private network or VPN is connected on this device.";
   }
   if (msg.toLowerCase().includes("decrypt") || msg.toLowerCase().includes("cipher") || msg.toLowerCase().includes("crypto")) {
     return "Decryption failed — make sure your encryption passphrase is identical on all devices.";
@@ -94,7 +94,7 @@ export class SetupWizard extends Modal {
     const uriSection = contentEl.createDiv({ cls: "sink-step" });
     uriSection.createEl("h3", { text: "Option A: Paste a Setup URI" });
     uriSection.createEl("p", {
-      text: "If you have a setup URI from another device, paste it here.",
+      text: "If you have a setup URI from another device, paste it here. The URI contains the server password and encryption passphrase in readable form; handle it securely.",
       cls: "setting-item-description",
     });
 
@@ -130,7 +130,7 @@ export class SetupWizard extends Modal {
       .setName("Server URL")
       .addText((text) =>
         text
-          .setPlaceholder("http://100.64.0.1:5984")
+          .setPlaceholder("http://100.64.0.1:5985")
           .setValue(this.plugin.settings.serverUrl)
           .onChange((value) => {
             this.plugin.settings.serverUrl = value.trim();
@@ -191,15 +191,22 @@ export class SetupWizard extends Modal {
           .setButtonText("Test & Continue")
           .setCta()
           .onClick(async () => {
-            await this.plugin.saveSettings();
-            const remote = new RemoteDB(this.plugin.settings);
-            const result = await remote.testConnection();
-            if (result.success) {
-              new Notice(`✓ ${result.message}`);
-              this.step = 2;
-              this.render();
-            } else {
-              new Notice(`✗ ${result.message}`);
+            btn.setDisabled(true);
+            btn.setButtonText("Testing...");
+            try {
+              await this.plugin.saveSettings();
+              const remote = new RemoteDB(this.plugin.settings);
+              const result = await remote.testConnection();
+              if (result.success) {
+                new Notice(`✓ ${result.message}`);
+                this.step = 2;
+                this.render();
+              } else {
+                new Notice(`✗ ${result.message}`);
+              }
+            } finally {
+              btn.setDisabled(false);
+              btn.setButtonText("Test & Continue");
             }
           })
       );
@@ -218,9 +225,14 @@ export class SetupWizard extends Modal {
 
     new Setting(options)
       .setName("Push vault to server")
-      .setDesc("Upload this vault's contents to the server. Use for the FIRST device.")
+      .setDesc("Upload this vault's contents to the server. This may overwrite server files. Use for the FIRST device.")
       .addButton((btn) =>
         btn.setButtonText("Push").onClick(async () => {
+          const ok = window.confirm(
+            "Push may overwrite files on the server with this vault's contents. Continue?"
+          );
+          if (!ok) return;
+
           this.step = 3;
           this.render();
           await this.performSync("push");
@@ -229,9 +241,14 @@ export class SetupWizard extends Modal {
 
     new Setting(options)
       .setName("Pull from server")
-      .setDesc("Download the server's contents to this vault. Use for ADDITIONAL devices with an empty vault.")
+      .setDesc("Download the server's contents to this vault. This may overwrite local files. Use for ADDITIONAL devices with an empty vault.")
       .addButton((btn) =>
         btn.setButtonText("Pull").onClick(async () => {
+          const ok = window.confirm(
+            "Pull may overwrite files in this vault with the server's contents. Continue?"
+          );
+          if (!ok) return;
+
           this.step = 3;
           this.render();
           await this.performSync("pull");
@@ -239,10 +256,15 @@ export class SetupWizard extends Modal {
       );
 
     new Setting(options)
-      .setName("Merge")
-      .setDesc("Sync both ways — keeps both local and server files. Use if this vault already has content.")
+      .setName("Push then pull")
+      .setDesc("Push local changes to the server, then pull server changes back. This runs both directions and does not merge conflicting edits automatically. Use if this vault already has content.")
       .addButton((btn) =>
-        btn.setButtonText("Merge").onClick(async () => {
+        btn.setButtonText("Push then pull").onClick(async () => {
+          const ok = window.confirm(
+            "Push then pull may overwrite server files first, then overwrite local files. Continue?"
+          );
+          if (!ok) return;
+
           this.step = 3;
           this.render();
           await this.performSync("merge");
@@ -338,12 +360,25 @@ export class SetupWizard extends Modal {
       contentEl.empty();
       contentEl.createEl("h2", { text: "Setup Failed" });
       contentEl.createEl("p", { text: describeError(e), cls: "sink-error-detail" });
-      new Setting(contentEl).addButton((btn) =>
-        btn.setButtonText("← Back").onClick(() => {
-          this.step = 1;
-          this.render();
-        })
-      );
+      contentEl.createEl("p", {
+        text: "Some files may already have transferred. Review the vault and server before retrying.",
+        cls: "setting-item-description",
+      });
+      new Setting(contentEl)
+        .addButton((btn) =>
+          btn.setButtonText("Retry").setCta().onClick(() => {
+            this.step = 3;
+            this.render();
+            void this.performSync(direction);
+          })
+        )
+        .addButton((btn) =>
+          btn.setButtonText("Change direction").onClick(() => {
+            this.step = 2;
+            this.render();
+          })
+        )
+        .addButton((btn) => btn.setButtonText("Close").onClick(() => this.close()));
     }
   }
 }

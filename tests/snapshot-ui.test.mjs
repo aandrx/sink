@@ -144,9 +144,9 @@ test("snapshot list failures render a bounded error instead of rejecting", async
   });
 
   await tab.renderSnapshots(container, info);
-  assert.match(container.textContent, /Could not load restore points/);
+  assert.match(container.textContent, /Could not load snapshots/);
   assert.match(container.textContent, /passphrase/);
-  assert.ok(notices.some((message) => /Could not load restore points/.test(message)));
+  assert.ok(notices.some((message) => /Could not load snapshots/.test(message)));
 });
 
 test("snapshot detail failures render an error and keep the selection usable", async () => {
@@ -158,7 +158,7 @@ test("snapshot detail failures render an error and keep the selection usable", a
 
   await tab.renderSnapshots(container, info);
   await settle(3);
-  assert.match(container.textContent, /Could not load this restore point/);
+  assert.match(container.textContent, /Could not load this snapshot/);
   assert.match(container.textContent, /passphrase/);
   assert.ok(container.querySelector("select"));
 });
@@ -215,6 +215,25 @@ test("restore is disabled while pending and reports a partial-apply warning on f
   assert.equal(restore.disabled, false);
   assert.match(container.textContent, /Some files may already have been restored/);
   assert.ok(notices.some((message) => /Some files may already have been restored/.test(message)));
+});
+
+test("a partial restore completion warns with the restored and snapshot file counts", async () => {
+  notices.length = 0;
+  const { tab, container, info } = makeTab({
+    listSnapshots: async () => [{ id: "new", reason: "newer", createdAt: 2, fileCount: 3 }],
+    getSnapshotDetails: async () => detail("new", "newer", 2),
+    restoreSnapshot: async () => 2,
+  });
+
+  window.confirm = () => true;
+  await tab.renderSnapshots(container, info);
+  await settle(3);
+
+  const restore = [...container.querySelectorAll("button")].find((button) => button.textContent === "Restore snapshot");
+  restore.click();
+  await settle(3);
+
+  assert.ok(notices.some((message) => /Restored 2 of 3 snapshot files/.test(message)));
 });
 
 test("snapshot diff read failures are reported instead of rejecting", async () => {

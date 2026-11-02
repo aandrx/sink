@@ -113,7 +113,7 @@ export class ConflictModal extends Modal {
     const revisions = getRevisions(this.options);
     if (revisions) {
       contentEl.createEl("p", {
-        text: "Applying a side resolves this conflict intentionally and retires the server revisions that are not chosen. Any backup is stored locally on this device only.",
+        text: "Applying a side resolves this conflict intentionally and retires the remote revisions that are not chosen. Any backup is stored locally on this device only.",
         cls: "setting-item-description sink-conflict-notice",
       });
       const controls = contentEl.createDiv({ cls: "sink-conflict-revisions" });
@@ -139,16 +139,16 @@ export class ConflictModal extends Modal {
       renderSplitDiff(contentEl, "Local", "Remote", this.mine, this.theirs);
     } else {
       contentEl.createEl("p", {
-        text: "No text preview is available for this file. Local publishes this vault's file; Remote replaces the local file. Leave both unchanged keeps both sides as they are.",
+        text: "No text preview is available for this file. Local publishes this vault's file; Remote replaces the local file. Choosing Leave both as they are keeps both sides unchanged.",
         cls: "setting-item-description sink-conflict-notice",
       });
     }
 
     const actions = contentEl.createDiv({ cls: "sink-conflict-actions" });
     const leaveButton = actions.createEl("button", {
-      text: "Leave both unchanged",
+      text: "Leave both as they are",
       cls: "sink-conflict-choice-leave",
-      attr: { title: "Close without changing this device or the server" },
+      attr: { title: "Close without changing the local file or the remote copy" },
     });
     const mineButton = actions.createEl("button", {
       text: "Local",
@@ -157,7 +157,7 @@ export class ConflictModal extends Modal {
     });
     const theirsButton = actions.createEl("button", {
       text: "Remote",
-      cls: "mod-cta sink-conflict-choice-theirs",
+      cls: "sink-conflict-choice-theirs",
       attr: { "aria-describedby": `${titleId}-theirs` },
     });
     const choose = (choice?: ConflictChoice) => {
@@ -196,13 +196,13 @@ export class ConflictModal extends Modal {
         return;
       }
       host.createEl("p", {
-        text: `The contents of server revision ${shortRevision(revision.rev)} are not available in this review. The revision metadata is shown instead. Choosing a side is still possible.`,
+        text: `The contents of remote revision ${shortRevision(revision.rev)} are not available in this review. The revision metadata is shown instead. Choosing a side is still possible.`,
         cls: "setting-item-description sink-conflict-notice",
       });
       return;
     }
 
-    const status = host.createEl("p", { text: "Loading selected server revision...", cls: "setting-item-description" });
+    const status = host.createEl("p", { text: "Loading selected remote revision...", cls: "setting-item-description" });
     status.setAttribute("aria-live", "polite");
     let pending: Promise<ConflictPreview>;
     try {
@@ -232,7 +232,7 @@ export class ConflictModal extends Modal {
       text: `Remote revision could not be loaded: ${message}. The revision metadata remains available and choosing a side is still possible.`,
       cls: "setting-item-description sink-conflict-notice sink-review-error",
     });
-    const retry = host.createEl("button", { text: "Retry server revision" });
+    const retry = host.createEl("button", { text: "Retry loading remote revision" });
     retry.addEventListener("click", () => this.loadSelectedRevision(host, ++this.previewToken));
   }
 

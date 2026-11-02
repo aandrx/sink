@@ -163,6 +163,10 @@ class CDP {
     });
     this.socket.onmessage = (event) => {
       const message = JSON.parse(event.data);
+      if (message.method === "Page.javascriptDialogOpening") {
+        void this.call("Page.handleJavaScriptDialog", { accept: true }).catch(() => undefined);
+        return;
+      }
       if (message.id && this.pending.has(message.id)) {
         const { resolve, reject, timer } = this.pending.get(message.id);
         clearTimeout(timer);
@@ -246,7 +250,7 @@ async function launchObsidian(label, couch, version, deviceName) {
     await evaluate(instance, "(async()=>{await app.plugins.setEnable(true); return true})()");
     await until(`${label} Sink plugin`, () => evaluate(instance, "!!(app.plugins.plugins.sink && app.plugins.plugins.sink.getSyncEngine && app.plugins.plugins.sink.settings.isConfigured)"), 30000, 250);
     await until(`${label} Sink engine`, () => evaluate(instance, "!!app.plugins.plugins.sink.getSyncEngine()"), 30000, 250);
-    await evaluate(instance, `(()=>{if(!window.__sinkE2EErrors){window.__sinkE2EErrors=[]; const original=console.error.bind(console); console.error=(...args)=>{window.__sinkE2EErrors.push(args.map((value)=>String(value&&value.message||value)).join(' ').slice(0,600)); if(window.__sinkE2EErrors.length>20) window.__sinkE2EErrors.shift(); original(...args)}} return true})()`);
+    await evaluate(instance, `(()=>{if(!window.__sinkE2EErrors){window.__sinkE2EErrors=[]; const original=console.error.bind(console); console.error=(...args)=>{window.__sinkE2EErrors.push(args.map((value)=>String(value&&value.message||value)).join(' ').slice(0,600)); if(window.__sinkE2EErrors.length>20) window.__sinkE2EErrors.shift(); original(...args)}} window.confirm=()=>true; return true})()`);
     const isolation = await evaluate(instance, "({vault:app.vault.adapter.getBasePath?.()||'', config:app.vault.configDir, plugins:Object.keys(app.plugins.plugins)})");
     assert.equal(path.resolve(isolation.vault), path.resolve(vault), `${label} opened the wrong vault`);
     assert.deepEqual(isolation.plugins, ["sink"], `${label} plugin did not load`);
@@ -583,7 +587,7 @@ async function main() {
     assert.equal(summary.count, 12, `review count was ${summary.count}`);
     assert.equal(summary.rows, 12, `visible rows were ${summary.rows}`);
     assert.equal(await evaluate(B, "document.querySelectorAll('.sink-diff-split .sink-diff-pane').length"), 0, "diff opened by default");
-    assert.equal(await evaluate(B, "document.querySelector('.sink-review-preview-content')?.textContent.includes('Open a file box')"), true, "collapsed diff hint missing");
+    assert.equal(await evaluate(B, "document.querySelector('.sink-review-preview-content')?.textContent.includes('Open a file row')"), true, "collapsed diff hint missing");
     assert.equal(await evaluate(B, "(()=>{const row=document.querySelector('.sink-review-file-row'); row.querySelector('.sink-review-file-meta').click(); return true})()"), true);
     await until("review diff preview", () => evaluate(B, "document.querySelectorAll('.sink-diff-split .sink-diff-pane').length===2"), 15000, 200);
     for (const [name, size, dark] of [["desktop-light", [1280, 900], false], ["desktop-dark", [1280, 900], true], ["narrow-light", [600, 900], false], ["narrow-dark", [600, 900], true]]) {

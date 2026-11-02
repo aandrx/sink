@@ -1,9 +1,11 @@
 import type { SyncStatus } from "../settings";
 
 /**
- * Floating status overlay aligned with the top-right action icons.
+ * Decorative floating status overlay aligned with the top-right action icons.
  * Shows idle label at rest, updates to activity text on push/pull,
  * then reverts to idle after a delay.
+ *
+ * The overlay is aria-hidden: the status bar is the accessible surface.
  */
 export class FloatingStatus {
   private el: HTMLElement;
@@ -14,6 +16,7 @@ export class FloatingStatus {
 
   constructor(workspaceEl: HTMLElement) {
     this.el = workspaceEl.createDiv({ cls: "sink-floating-status" });
+    this.el.setAttribute("aria-hidden", "true");
     // Child div matches obsidian-livesync pattern: inner div gets opacity+grayscale from CSS
     this.textEl = this.el.createDiv();
     this.detailEl = this.el.createDiv({ cls: "sink-floating-status-detail" });
@@ -34,8 +37,8 @@ export class FloatingStatus {
 
   showActivity(path: string, direction: "push" | "pull", sourceDevice?: string): void {
     const filename = path.split("/").pop() ?? path;
-    const verb = direction === "push" ? "Draining" : "Filling";
-    this.textEl.setText(`${verb}  ${filename}`);
+    const verb = direction === "push" ? "Sending" : "Receiving";
+    this.textEl.setText(`${verb} ${filename}`);
     this.detailEl.setText(direction === "pull" && sourceDevice ? `From ${sourceDevice}` : "");
     this.applyColor(direction === "push" ? "syncing" : "connected");
 
@@ -49,28 +52,30 @@ export class FloatingStatus {
 
   private renderIdle(): void {
     const labels: Record<SyncStatus, string> = {
-      connected:    "Full",
-      syncing:      "Flowing",
+      connected:    "Connected",
+      syncing:      "Syncing",
       error:        "Blocked",
-      paused:       "Holding",
-      disconnected: "Empty",
+      paused:       "Review",
+      disconnected: "Disconnected",
     };
     this.textEl.setText(labels[this.status] ?? "Sink");
     this.detailEl.setText("");
     this.applyColor(this.status);
   }
 
-  private applyColor(status: SyncStatus | "connected" | "syncing"): void {
+  private applyColor(status: SyncStatus): void {
     this.textEl.removeClass(
       "sink-floating-connected",
       "sink-floating-syncing",
       "sink-floating-error",
+      "sink-floating-paused",
       "sink-floating-disconnected"
     );
     switch (status) {
       case "connected": this.textEl.addClass("sink-floating-connected"); break;
       case "syncing":   this.textEl.addClass("sink-floating-syncing");   break;
       case "error":     this.textEl.addClass("sink-floating-error");     break;
+      case "paused":    this.textEl.addClass("sink-floating-paused");    break;
       default:          this.textEl.addClass("sink-floating-disconnected"); break;
     }
   }

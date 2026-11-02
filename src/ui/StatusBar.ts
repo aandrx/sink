@@ -21,14 +21,14 @@ export class StatusBar {
 
   private render(): void {
     const labels: Record<SyncStatus, string> = {
-      connected:    "Sink",
+      connected:    "Sink ✓",
       syncing:      "Sink ↑↓",
       error:        "Sink ✗",
       paused:       "Sink ⏸",
       disconnected: "Sink ○",
     };
     const tooltips: Record<SyncStatus, string> = {
-      connected:    "Sink: Connected to server; pending reviews may still need attention",
+      connected:    "Sink: Connected to server",
       syncing:      "Sink: Syncing changes",
       error:        "Sink: Sync blocked; check the latest error for details",
       paused:       "Sink: Waiting for review or permission",
