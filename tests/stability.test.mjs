@@ -1099,7 +1099,7 @@ test("a leaf arriving before conflict publication is not whitelisted", async () 
   engine.loadAllLeafDocs = async (docId) => [...await original(docId), leafDoc("note.md", "arrival", "9-arrival")];
   await assert.rejects(
     engine.resolveConflictChange(prepared, { path: "note.md", selected: true, decision: "keep-remote", conflictRevision: "2-loser" }),
-    /unreviewed database revision arrived before conflict resolution/,
+    /unreviewed live database revision arrived before conflict resolution/,
   );
   assert.equal(db.conflictLeaves(id).length, before);
   assert.equal((await db.get(id, { conflicts: true })).content, "server winner");
@@ -1267,7 +1267,7 @@ test("a live revision arriving during retirement stops conflict cleanup", async 
   engine.localDB.instance.remove = async () => { removed += 1; };
   await assert.rejects(
     engine.retireConflictLeaves({ remoteDoc: { _id: id }, path: "note.md" }, false, "chosen", new Set(["3-chosen"])),
-    /unreviewed database revision arrived/,
+    /unreviewed live database revision arrived/,
   );
   assert.equal(removed, 0);
 });
@@ -1303,7 +1303,7 @@ test("an unreviewed leaf that wins the revision election is not adopted", async 
   engine.publishChosenConflictContent = async () => { published += 1; return true; };
   await assert.rejects(
     engine.retireConflictLeaves({ remoteDoc: { _id: id }, path: "note.md" }, false, "reviewed", new Set(["2-aaa"])),
-    /unreviewed database revision arrived/,
+    /unreviewed live database revision arrived/,
   );
   assert.equal(removed, 0);
   assert.equal(published, 0);

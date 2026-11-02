@@ -112,6 +112,7 @@ export class SyncEngine {
   private reviewModal: BatchReviewModal | null = null;
   private approvalModal: Modal | null = null;
   private reviewStatusActive = false;
+  private conflictReviewPaused = false;
   private lastApplyIncomplete = false;
   private reviewCancelled = false;
   private readonly appliedFingerprints = new Map<string, string>();
@@ -1641,6 +1642,7 @@ export class SyncEngine {
     }
 
     if (this.stopped || !review.approved) {
+      this.resumeConflictReviewReplication();
       this.lastApplyIncomplete = true;
       this.reviewCancelled = true;
       for (const change of changes) {
@@ -1673,6 +1675,7 @@ export class SyncEngine {
     }
 
     if (selected.length === 0) {
+      this.resumeConflictReviewReplication();
       this.lastApplyIncomplete = true;
       this.finishReviewStatus();
       return 0;
@@ -1684,6 +1687,7 @@ export class SyncEngine {
     });
     if (willPublish && !(await this.ensurePushAllowed(`publish ${selected.length} selected file${selected.length === 1 ? "" : "s"}`))) {
       // Permission is checked before any snapshot or vault mutation. Denial changes nothing.
+      this.resumeConflictReviewReplication();
       this.lastApplyIncomplete = true;
       this.reviewCancelled = true;
       for (const change of changes) {
@@ -1730,6 +1734,7 @@ export class SyncEngine {
         this.lastApplyIncomplete = true;
         this.remoteHeadState = "behind";
         for (const change of selected) this.saveDeferredReviewMarker(change);
+        this.resumeConflictReviewReplication();
         this.finishReviewStatus();
         throw error;
       }
@@ -1814,6 +1819,7 @@ export class SyncEngine {
     }
 
     if (applied < selected.length) this.lastApplyIncomplete = true;
+    this.resumeConflictReviewReplication();
     this.finishReviewStatus();
     return applied;
   }
@@ -1897,6 +1903,11 @@ export class SyncEngine {
   }
 
   private async reviewBatch(title: string, changes: PreparedChange[]): Promise<ReviewResult> {
+    if (changes.some((change) => change.hasUnresolvedConflicts)) {
+      // Keep the reviewed leaf set stable while the user decides.
+      this.replicator?.stop();
+      this.conflictReviewPaused = true;
+    }
     if (!this.reviewPromise) {
       this.reviewPromise = new Promise<ReviewResult>((resolve) => {
         this.reviewModal = new BatchReviewModal(this.app, title, changes, resolve);
@@ -1909,6 +1920,12 @@ export class SyncEngine {
     }
 
     return await this.reviewPromise;
+  }
+
+  private resumeConflictReviewReplication(): void {
+    if (!this.conflictReviewPaused) return;
+    this.conflictReviewPaused = false;
+    if (!this.stopped) this.replicator?.start();
   }
 
   private finishReviewStatus(): void {
@@ -2151,8 +2168,8 @@ export class SyncEngine {
       const currentRev = current._rev;
       if (!currentRev) throw new Error("The retained conflict winner has no revision");
       for (const leaf of leaves) {
-        if (leaf._rev && !knownLeaves.has(leaf._rev)) {
-          throw new Error("An unreviewed database revision arrived during conflict resolution; nothing further was retired");
+        if (leaf._rev && !leaf.deleted && !knownLeaves.has(leaf._rev)) {
+          throw new Error("An unreviewed live database revision arrived during conflict resolution; nothing further was retired");
         }
       }
 
@@ -2272,8 +2289,8 @@ export class SyncEngine {
 
     const knownLeaves = new Set(observed);
     for (const leaf of beforeLeaves) {
-      if (leaf._rev && !knownLeaves.has(leaf._rev)) {
-        throw new Error("An unreviewed database revision arrived before conflict resolution started; nothing was retired");
+      if (leaf._rev && !leaf.deleted && !knownLeaves.has(leaf._rev)) {
+        throw new Error("An unreviewed live database revision arrived before conflict resolution started; nothing was retired");
       }
     }
     if (!(await this.publishChosenConflictContent(change.path, chosenDeleted, current._rev))) {

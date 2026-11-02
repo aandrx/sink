@@ -8,6 +8,15 @@ interface ReleaseNote {
 
 const LATEST_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.2.19",
+    title: "Stable Conflict Resolution",
+    points: [
+      "Pauses live replication during a retained-conflict review so the reviewed revision set cannot change while you decide.",
+      "Allows deleted tombstone leaves to be ignored without blocking retirement.",
+      "Resumes replication after the review is applied or cancelled.",
+    ],
+  },
+  {
     version: "0.2.18",
     title: "Bounded Device History",
     points: [
