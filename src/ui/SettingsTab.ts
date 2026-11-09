@@ -6,6 +6,8 @@ import { renderSplitDiff } from "./DiffView";
 import { generateSetupURI } from "../utils/uri";
 import { SetupWizard } from "./SetupWizard";
 
+const SNAPSHOT_DISPLAY_LIMIT = 5;
+
 export class SinkSettingsTab extends PluginSettingTab {
   plugin: SinkPlugin;
   private snapshotRenderGeneration = 0;
@@ -286,7 +288,7 @@ export class SinkSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Refresh snapshots")
-      .setDesc("Show recent snapshots")
+      .setDesc("Show the 5 most recent snapshots")
       .addButton((btn) =>
         btn.setButtonText("Refresh").onClick(async () => {
           btn.setDisabled(true);
@@ -484,14 +486,16 @@ export class SinkSettingsTab extends PluginSettingTab {
     }
 
     try {
-      const snapshots = await engine.listSnapshots(15);
+      const snapshots = (await engine.listSnapshots(SNAPSHOT_DISPLAY_LIMIT)).slice(0, SNAPSHOT_DISPLAY_LIMIT);
       if (renderGeneration !== this.snapshotRenderGeneration) return;
       if (snapshots.length === 0) {
         infoEl.setText("No snapshots found yet.");
         return;
       }
 
-      infoEl.setText("Snapshots are local safety copies taken before risky batches are applied.");
+      infoEl.setText(
+        "Snapshots are local safety copies taken before risky batches are applied. Showing the 5 most recent snapshots. Older snapshots remain stored on this device."
+      );
 
       const selectorRow = container.createDiv({ cls: "sink-snapshot-selector-row" });
       const select = selectorRow.createEl("select", { cls: "sink-snapshot-select" });

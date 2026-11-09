@@ -183,6 +183,19 @@ test("snapshot summaries are bounded without deleting older local snapshots", as
   assert.equal(summaries[0].id, "s54");
 });
 
+test("snapshot summaries default to five without deleting older snapshots", async () => {
+  const local = new LocalDB("test");
+  const db = local.instance;
+  for (let index = 0; index < 7; index++) {
+    await local.putSnapshotDoc(snapshotDoc(`s${index}`, `payload ${index}`, index));
+  }
+
+  assert.deepEqual((await local.getSnapshotSummaries()).map((entry) => entry.id), ["s6", "s5", "s4", "s3", "s2"]);
+  assert.equal(db.docs.has(localSnapshotId("s0")), true, "older payload must remain stored");
+  assert.equal(db.docs.has(localSnapshotId("s1")), true, "older payload must remain stored");
+  assert.equal((await local.getSnapshotSummaries(20)).length, 7);
+});
+
 test("snapshot index retries once after a 409 and then lists the saved snapshot", async () => {
   const local = new LocalDB("test");
   const db = local.instance;

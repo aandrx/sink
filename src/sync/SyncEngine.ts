@@ -844,7 +844,7 @@ export class SyncEngine {
   private async createLocalOnlyStartupCandidate(file: TFile): Promise<PreparedChange | null> {
     if (this.stopped || !this.isPathAllowed(file.path)) return null;
     const local = await this.readLocalFileState(file.path);
-    const localFingerprint = local.isBinary ? null : await this.contentFingerprint(local.content);
+    const localFingerprint = await this.localContentFingerprint(local, file.path);
     const path = file.path;
     const id = this.localDB.pathToId(path);
     return {
@@ -903,7 +903,7 @@ export class SyncEngine {
     await this.localDB.destroy();
   }
 
-  async listSnapshots(limit = 20): Promise<SnapshotSummary[]> {
+  async listSnapshots(limit = 5): Promise<SnapshotSummary[]> {
     return this.localDB.getSnapshotSummaries(limit);
   }
 
@@ -1166,7 +1166,7 @@ export class SyncEngine {
         if (this.crypto && remoteEncrypted) {
           remoteDoc = await this.decryptDoc(doc);
         }
-        if (!remoteDoc.deleted && !isBinary) {
+        if (!remoteDoc.deleted) {
           const decryptChunk = this.crypto && remoteEncrypted
             ? (data: string, iv: string) => this.crypto!.decrypt(data, iv)
             : undefined;
@@ -1175,24 +1175,31 @@ export class SyncEngine {
         }
 
         const local = await this.readLocalFileState(doc.path);
-        if (!hasUnresolvedConflicts && !doc.deleted && local.exists && !local.isBinary && local.content === remoteDoc.content) continue;
-        if (!hasUnresolvedConflicts && doc.deleted && !local.exists) continue;
+        const localFingerprint = await this.localContentFingerprint(local, doc.path);
+        const remoteFingerprint = remoteDoc.deleted ? "" : await this.contentFingerprint(remoteDoc.content);
+        if (!hasUnresolvedConflicts && !remoteDoc.deleted && local.exists && localFingerprint === remoteFingerprint) continue;
+        if (!hasUnresolvedConflicts && remoteDoc.deleted && !local.exists) continue;
 
         const lastApplied = this.readLastAppliedFingerprint(doc.path);
-        const localFingerprint = local.isBinary ? null : await this.contentFingerprint(local.content);
         const safeFastForward = !hasUnresolvedConflicts
-          && !isBinary
           && local.exists
           && !remoteDoc.deleted
           && !!lastApplied
           && lastApplied === localFingerprint
-          && local.content !== remoteDoc.content;
+          && localFingerprint !== remoteFingerprint;
         const suggested = hasUnresolvedConflicts
           ? (local.exists ? "keep-local" : "keep-remote")
           : safeFastForward
             ? "keep-remote"
             : this.suggestDecision(local, remoteDoc);
         const remoteContent = isBinary ? "" : (remoteDoc.deleted ? "" : remoteDoc.content);
+        // The live path receives full decoded content. Keep only the canonical
+        // fingerprint for binary rows and rehydrate at apply time, so a large
+        // replication batch does not retain every attachment in memory.
+        const binaryHydration = isBinary && !remoteDoc.deleted;
+        if (binaryHydration) {
+          remoteDoc = { ...remoteDoc, content: "" };
+        }
 
         prepared.push({
           path: remoteDoc.path,
@@ -1211,6 +1218,9 @@ export class SyncEngine {
           remoteEncrypted,
           safeFastForward,
           hasUnresolvedConflicts,
+          localFingerprint,
+          remoteFingerprint,
+          needsHydration: binaryHydration,
           conflictRevisions: conflictMetadata?.revisions,
           conflictRevision: conflictMetadata?.selectedRevision,
           loadConflictPreview: conflictMetadata
@@ -1247,6 +1257,11 @@ export class SyncEngine {
     const branches = (doc as { _conflicts?: unknown })._conflicts;
     if (!Array.isArray(branches)) return [];
     return Array.from(new Set(branches.filter((value): value is string => typeof value === "string"))).sort();
+  }
+
+  /** CouchDB physical tombstones are not live leaves. Application deletions are. */
+  private isPhysicalTombstone(doc: SinkDoc): boolean {
+    return !!(doc as SinkDoc & { _deleted?: boolean })._deleted;
   }
 
   private async loadAllLeafDocs(id: string): Promise<SinkDoc[]> {
@@ -1360,20 +1375,30 @@ export class SyncEngine {
     return normalized.every((value, index) => value === actual[index]);
   }
 
-  private async decodeIncomingDocForComparison(doc: SinkDoc, isBinary: boolean): Promise<SinkDoc> {
+  private async decodeIncomingDocForComparison(doc: SinkDoc, _isBinary: boolean): Promise<SinkDoc> {
     const remoteEncrypted = !!doc.iv;
     if (remoteEncrypted && !this.crypto) throw new Error(`Encrypted file requires a passphrase: ${doc.path}`);
     let decoded = doc;
     if (this.crypto && remoteEncrypted) {
       decoded = await this.decryptDoc(doc);
     }
-    if (!decoded.deleted && !isBinary) {
+    if (!decoded.deleted) {
       const decryptChunk = this.crypto && remoteEncrypted
         ? (data: string, iv: string) => this.crypto!.decrypt(data, iv)
         : undefined;
       decoded = { ...decoded, content: await this.serializer.readDocContent(decoded, decryptChunk), chunks: undefined };
     }
     return decoded;
+  }
+
+  /** Canonical identity for the local side: text content or bounded-read base64 binary. */
+  private async localContentFingerprint(local: LocalFileState, path: string): Promise<string | null> {
+    if (!local.exists) return null;
+    if (!local.isBinary) return await this.contentFingerprint(local.content);
+    const file = this.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) return null;
+    const content = arrayBufferToBase64(await this.readBoundedBinary(file));
+    return await this.contentFingerprint(content);
   }
 
   private async loadPinnedIncomingDoc(id: string, rev?: string): Promise<SinkDoc> {
@@ -1418,19 +1443,18 @@ export class SyncEngine {
           : null;
         const decoded = await this.decodeIncomingDocForComparison(doc, isBinary);
         const local = await this.readLocalFileState(doc.path);
-        if (!hasUnresolvedConflicts && !doc.deleted && local.exists && !local.isBinary && local.content === decoded.content) continue;
+        const localFingerprint = await this.localContentFingerprint(local, doc.path);
+        const remoteFingerprint = doc.deleted ? "" : await this.contentFingerprint(decoded.content);
+        if (!hasUnresolvedConflicts && !doc.deleted && local.exists && localFingerprint === remoteFingerprint) continue;
         if (!hasUnresolvedConflicts && doc.deleted && !local.exists) continue;
 
-        const localFingerprint = local.exists && !local.isBinary ? await this.contentFingerprint(local.content) : null;
-        const remoteFingerprint = doc.deleted ? "" : await this.contentFingerprint(decoded.content);
         const lastApplied = this.readLastAppliedFingerprint(doc.path);
         const safeFastForward = !hasUnresolvedConflicts
-          && !isBinary
           && local.exists
           && !decoded.deleted
           && !!lastApplied
           && lastApplied === localFingerprint
-          && local.content !== decoded.content;
+          && localFingerprint !== remoteFingerprint;
         let suggested: ChangeDecision;
         let requiresReview = false;
         let safeLocalPush = false;
@@ -1598,12 +1622,16 @@ export class SyncEngine {
   private isDivergentChange(change: PreparedChange): boolean {
     if (change.safeLocalPush) return false;
     if (!change.localExists || change.remoteDeleted || change.safeFastForward) return false;
-    if (change.isBinary) return (change.localMtime ?? 0) !== change.remoteMtime;
-    if (change.localContent !== undefined || change.remoteContent !== undefined) {
-      return (change.localContent ?? "") !== (change.remoteContent ?? "");
+    if (change.localExists && change.isBinary && change.localFingerprint == null) {
+      // A binary file that existed during preparation could not be read back.
+      // Treat it as divergent rather than auto-applying on metadata alone.
+      return true;
     }
     if (change.localFingerprint != null && change.remoteFingerprint !== undefined) {
       return change.localFingerprint !== change.remoteFingerprint;
+    }
+    if (change.localContent !== undefined || change.remoteContent !== undefined) {
+      return (change.localContent ?? "") !== (change.remoteContent ?? "");
     }
     return (change.localMtime ?? 0) !== change.remoteMtime;
   }
@@ -1629,13 +1657,23 @@ export class SyncEngine {
 
     let review: ReviewResult;
     if (needsReview) {
+      const explicit = changes.filter((change) => this.requiresExplicitReview(change));
+      const explicitSet = new Set(explicit);
+      // When a batch mixes explicit rows with safe auto rows, review only the
+      // explicit rows and accept the rest. A batch with no explicit rows keeps
+      // the existing whole-batch policy.
+      const reviewChanges = explicit.length > 0 && explicit.length < changes.length ? explicit : changes;
+      const autoChanges = reviewChanges === changes ? [] : changes.filter((change) => !explicitSet.has(change));
       this.reviewStatusActive = true;
       this.status = "paused";
       this.handler({ type: "status-change", status: "paused" });
       try {
-        review = await this.reviewBatch(title, changes);
+        review = await this.reviewBatch(title, reviewChanges);
       } finally {
         this.reviewStatusActive = false;
+      }
+      if (review.approved && autoChanges.length > 0) {
+        review = { approved: true, decisions: [...review.decisions, ...this.acceptAll(autoChanges).decisions] };
       }
     } else {
       review = this.acceptAll(changes);
@@ -1836,7 +1874,12 @@ export class SyncEngine {
     if (change.localExists) {
       if (!(current instanceof TFile)) return false;
       if (change.localMtime !== undefined && current.stat.mtime !== change.localMtime) return false;
-      if (!change.isBinary) {
+      if (change.isBinary) {
+        if (change.localFingerprint != null) {
+          const content = arrayBufferToBase64(await this.readBoundedBinary(current));
+          if (await this.contentFingerprint(content) !== change.localFingerprint) return false;
+        }
+      } else {
         const needsContent = change.localFingerprint != null || change.localContent !== undefined;
         if (needsContent) {
           const content = await this.vault.read(current);
@@ -1864,14 +1907,20 @@ export class SyncEngine {
     return true;
   }
 
-  private async shouldReviewBatch(changes: PreparedChange[]): Promise<boolean> {
+  /** A row that must be shown explicitly even when the rest of a batch is safe. */
+  private requiresExplicitReview(change: PreparedChange): boolean {
     // Startup reconciliation and explicit startup classifications force review
     // before any publication, deletion, or uncertain divergence.
-    if (changes.some((change) => change.requiresReview)) return true;
+    if (change.requiresReview) return true;
     // Session permission never bypasses deletions, retained branches, or divergent edits.
-    if (changes.some((change) => change.remoteDeleted || change.hasUnresolvedConflicts || change.hasDeferredReview)) return true;
-    if (changes.some((change) => this.isDivergentChange(change))) return true;
-    if (!this.settings.autoResolveConflicts && changes.some((change) => change.localExists)) return true;
+    if (change.remoteDeleted || change.hasUnresolvedConflicts || change.hasDeferredReview) return true;
+    if (this.isDivergentChange(change)) return true;
+    if (!this.settings.autoResolveConflicts && change.localExists) return true;
+    return false;
+  }
+
+  private async shouldReviewBatch(changes: PreparedChange[]): Promise<boolean> {
+    if (changes.some((change) => this.requiresExplicitReview(change))) return true;
     if (this.sessionMergeAllowed) return false;
 
     const activeDevices = await this.getKnownDevices();
@@ -2168,7 +2217,7 @@ export class SyncEngine {
       const currentRev = current._rev;
       if (!currentRev) throw new Error("The retained conflict winner has no revision");
       for (const leaf of leaves) {
-        if (leaf._rev && !leaf.deleted && !knownLeaves.has(leaf._rev)) {
+        if (leaf._rev && !this.isPhysicalTombstone(leaf) && !knownLeaves.has(leaf._rev)) {
           throw new Error("An unreviewed live database revision arrived during conflict resolution; nothing further was retired");
         }
       }
@@ -2185,6 +2234,7 @@ export class SyncEngine {
       const conflictRevs = new Set(this.conflictSet(current));
       const removals = leaves
         .filter((leaf) => leaf._rev && leaf._rev !== currentRev)
+        .filter((leaf) => !this.isPhysicalTombstone(leaf))
         .filter((leaf) => !leaf.deleted || conflictRevs.has(leaf._rev!))
         .map((leaf) => leaf._rev!)
         .sort();
@@ -2199,12 +2249,10 @@ export class SyncEngine {
       const verified = await this.loadPinnedIncomingDoc(id);
       const verifiedLeaves = await this.loadAllLeafDocs(id);
       const noConflicts = this.conflictSet(verified).length === 0;
-      const liveLeaves = verifiedLeaves.filter((leaf) => !leaf.deleted);
-      // Removed losing revisions can remain as deleted tombstone leaves. They do
-      // not represent unresolved conflicts and must not block verification.
-      const liveLeavesMatch = chosenDeleted
-        ? liveLeaves.length === 0
-        : liveLeaves.length === 1 && liveLeaves[0]._rev === verified._rev;
+      // Physical tombstones are ignored. Application deletions remain live, and a
+      // chosen deletion is represented by one live deletion winner.
+      const liveLeaves = verifiedLeaves.filter((leaf) => !this.isPhysicalTombstone(leaf));
+      const liveLeavesMatch = liveLeaves.length === 1 && liveLeaves[0]._rev === verified._rev;
       if (noConflicts && liveLeavesMatch && await this.winnerMatchesChosen(verified, chosenDeleted, expectedContent)) {
         return true;
       }
@@ -2289,7 +2337,7 @@ export class SyncEngine {
 
     const knownLeaves = new Set(observed);
     for (const leaf of beforeLeaves) {
-      if (leaf._rev && !leaf.deleted && !knownLeaves.has(leaf._rev)) {
+      if (leaf._rev && !this.isPhysicalTombstone(leaf) && !leaf.deleted && !knownLeaves.has(leaf._rev)) {
         throw new Error("An unreviewed live database revision arrived before conflict resolution started; nothing was retired");
       }
     }

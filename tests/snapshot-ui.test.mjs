@@ -149,6 +149,24 @@ test("snapshot list failures render a bounded error instead of rejecting", async
   assert.ok(notices.some((message) => /Could not load snapshots/.test(message)));
 });
 
+test("snapshot settings request and render at most five snapshots", async () => {
+  notices.length = 0;
+  let requestedLimit;
+  const many = Array.from({ length: 7 }, (_, index) => summary(`s${index}`, `reason ${index}`, 10 - index));
+  const { tab, container, info } = makeTab({
+    listSnapshots: async (limit) => { requestedLimit = limit; return many; },
+    getSnapshotDetails: async (id) => detail(id, `reason ${id}`, 1),
+  });
+
+  await tab.renderSnapshots(container, info);
+  await settle(3);
+
+  assert.equal(requestedLimit, 5);
+  assert.equal(container.querySelectorAll("select option").length, 5);
+  assert.match(info.textContent, /5 most recent snapshots/);
+  assert.match(info.textContent, /Older snapshots remain stored/);
+});
+
 test("snapshot detail failures render an error and keep the selection usable", async () => {
   notices.length = 0;
   const { tab, container, info } = makeTab({

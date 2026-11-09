@@ -291,11 +291,27 @@ test("chunked text is reconstructed for review/merge; identical notes are skippe
   assert.equal((await engine.prepareIncomingChanges([incoming])).length, 0);
 });
 
-test("binary review inspects metadata without reading the local binary", async () => {
+test("binary review reads the local binary once for identity without retaining it", async () => {
   const { engine, vault, files } = fixture();
-  files.set("image.png", new TFile("image.png", ""));
-  await engine.prepareIncomingChanges([doc("image.png", "AQID")]);
-  assert.equal(vault.binaryReads, 0);
+  files.set("image.png", new TFile("image.png", "", 3));
+  const [prepared] = await engine.prepareIncomingChanges([doc("image.png", "BAUG")]);
+  assert.equal(vault.binaryReads, 1);
+  assert.equal(prepared.localContent, "");
+  assert.equal(prepared.remoteContent, "");
+});
+
+test("live binary preparation drops decoded bodies and rehydrates before apply", async () => {
+  const { engine, db, files } = fixture();
+  const incoming = { ...doc("image.png", "BAUG"), _rev: "1" };
+  db.docs.set(incoming._id, incoming);
+  files.set("image.png", new TFile("image.png", "", 3));
+  const [prepared] = await engine.prepareIncomingChanges([incoming]);
+  assert.equal(prepared.needsHydration, true);
+  assert.equal(prepared.remoteDoc.content, "");
+  assert.equal(prepared.remoteFingerprint, await engine.contentFingerprint("BAUG"));
+  const hydrated = await engine.hydratePreparedChange(prepared);
+  assert.equal(hydrated.needsHydration, false);
+  assert.equal(hydrated.remoteDoc.content, "BAUG");
 });
 
 test("incoming config is filtered, and toggling off blocks an already prepared write", async () => {
@@ -510,7 +526,9 @@ test("one complete review preflights bounded snapshots before applying a larger 
   const { engine, files } = fixture();
   const paths = ["a.pdf", "b.pdf", "c.pdf", "d.pdf"];
   for (const name of paths) files.set(name, new TFile(name, "", 3 * 1024 * 1024));
-  const prepared = await engine.prepareIncomingChanges(paths.map((name) => doc(name)));
+  const incoming = paths.map((name) => doc(name));
+  for (const entry of incoming) await engine.localDB.instance.put(entry);
+  const prepared = await engine.prepareIncomingChanges(incoming);
   let reviews = 0;
   engine.shouldReviewBatch = async () => true;
   engine.reviewBatch = async () => { reviews++; return engine.acceptAll(prepared); };
@@ -530,7 +548,9 @@ test("a later backup failure prevents all selected vault changes", async () => {
   const { engine, files, vault } = fixture();
   const paths = ["a.pdf", "b.pdf", "c.pdf", "d.pdf"];
   for (const name of paths) files.set(name, new TFile(name, "", 3 * 1024 * 1024));
-  const prepared = await engine.prepareIncomingChanges(paths.map((name) => doc(name)));
+  const incoming = paths.map((name) => doc(name));
+  for (const entry of incoming) await engine.localDB.instance.put(entry);
+  const prepared = await engine.prepareIncomingChanges(incoming);
   engine.shouldReviewBatch = async () => true;
   engine.reviewBatch = async () => engine.acceptAll(prepared);
   let backups = 0;
@@ -1238,7 +1258,7 @@ test("retirement ignores already-deleted nonconflict tombstones on later passes"
   });
   engine.loadAllLeafDocs = async () => [
     leafDoc("note.md", "chosen", "3-winner"),
-    leafDoc("note.md", "", "2-tombstone", { deleted: true, size: 0 }),
+    leafDoc("note.md", "", "2-tombstone", { _deleted: true, deleted: true, size: 0 }),
   ];
   engine.winnerMatchesChosen = async () => {
     winnerChecks += 1;
@@ -1614,4 +1634,152 @@ test("startup collection retains only metadata and fingerprints, never plaintext
     assert.equal(candidate.remoteDoc.content, "");
   }
   assert.equal(typeof candidates.find((candidate) => candidate.path === "local-only.md").loadPreview, "function");
+});
+
+test("unchanged inline binary produces no candidate in light or eager preparation", async () => {
+  const { engine, files } = fixture();
+  files.set("image.png", new TFile("image.png", "", 3));
+  assert.equal((await engine.prepareLightCandidates([doc("image.png", "AQID")])).length, 0);
+  assert.equal((await engine.prepareIncomingChanges([doc("image.png", "AQID")])).length, 0);
+});
+
+test("unchanged chunked plain and encrypted binary produces no candidate", async () => {
+  const plain = fixture();
+  plain.files.set("image.png", new TFile("image.png", "", 3));
+  plain.db.docs.set("chunk:plain", { type: "chunk", data: "AQID" });
+  const plainParent = { ...doc("image.png", ""), chunks: ["chunk:plain"] };
+  assert.equal((await plain.engine.prepareLightCandidates([plainParent])).length, 0);
+  assert.equal((await plain.engine.prepareIncomingChanges([plainParent])).length, 0);
+
+  const encrypted = fixture();
+  const helper = new CryptoHelper("test-only-passphrase");
+  encrypted.engine.crypto = helper;
+  encrypted.files.set("image.png", new TFile("image.png", "", 3));
+  const chunk = await helper.encrypt("AQID");
+  const parent = await helper.encrypt("");
+  encrypted.db.docs.set("chunk:encrypted", { type: "chunk", data: chunk.ciphertext, iv: chunk.iv });
+  const encryptedParent = { ...doc("image.png", parent.ciphertext), iv: parent.iv, chunks: ["chunk:encrypted"] };
+  assert.equal((await encrypted.engine.prepareLightCandidates([encryptedParent])).length, 0);
+  assert.equal((await encrypted.engine.prepareIncomingChanges([encryptedParent])).length, 0);
+});
+
+test("timestamp-only changes with identical text or binary bytes produce no candidate", async () => {
+  const { engine, files } = fixture();
+  const note = new TFile("note.md", "same bytes");
+  note.stat.mtime = 99;
+  files.set(note.path, note);
+  const image = new TFile("image.png", "", 3);
+  image.stat.mtime = 99;
+  files.set(image.path, image);
+
+  assert.equal((await engine.prepareLightCandidates([doc("note.md", "same bytes")])).length, 0);
+  assert.equal((await engine.prepareLightCandidates([doc("image.png", "AQID")])).length, 0);
+});
+
+test("same-mtime binary content changes fail the stale check", async () => {
+  const { engine, files, vault } = fixture();
+  const image = new TFile("image.png", "", 3);
+  image.stat.mtime = 5;
+  files.set(image.path, image);
+  const [prepared] = await engine.prepareIncomingChanges([doc("image.png", "BAUG")]);
+  assert.ok(prepared);
+  assert.equal(image.stat.mtime, 5);
+  vault.readBinary = async () => new Uint8Array([4, 5, 6]).buffer;
+  assert.equal(await engine.isChangeStillCurrent(prepared), false);
+});
+
+test("missing chunks defer binary candidates instead of hashing an empty parent", async () => {
+  const { engine, db } = fixture();
+  const incoming = { ...doc("image.png", ""), chunks: ["chunk:missing"] };
+  db.docs.set(incoming._id, incoming);
+  assert.equal((await engine.prepareLightCandidates([incoming])).length, 0);
+  assert.equal(engine.deferredIncoming.has(incoming._id), true);
+  assert.equal((await engine.prepareIncomingChanges([incoming])).length, 0);
+  assert.equal(engine.deferredIncoming.has(incoming._id), true);
+});
+
+test("physical _deleted tombstones are ignored while application deletions remain live", async () => {
+  const { engine } = fixture();
+  const id = "file:note.md";
+  const winner = leafDoc("note.md", "chosen", "3-winner");
+  const physical = leafDoc("note.md", "", "2-physical", { _deleted: true, deleted: true, size: 0 });
+  engine.loadPinnedIncomingDoc = async () => ({ ...winner, _conflicts: [] });
+  engine.loadAllLeafDocs = async () => [winner, physical];
+  const removed = [];
+  engine.localDB.instance.remove = async (_id, rev) => { removed.push(rev); };
+  const change = { remoteDoc: { _id: id }, path: "note.md" };
+
+  assert.equal(await engine.retireConflictLeaves(change, false, "chosen", new Set(["3-winner"])), true);
+  assert.deepEqual(removed, []);
+
+  const applicationDeletion = leafDoc("note.md", "", "2-app-deleted", { deleted: true, size: 0 });
+  engine.loadAllLeafDocs = async () => [winner, physical, applicationDeletion];
+  await assert.rejects(
+    engine.retireConflictLeaves(change, false, "chosen", new Set(["3-winner", "2-app-deleted"])),
+    /could not be retired/
+  );
+  assert.deepEqual(removed, []);
+});
+
+test("conflict resolution preflight ignores physical tombstones", async () => {
+  const { engine, files } = fixture();
+  files.set("note.md", new TFile("note.md", "local"));
+  const winner = leafDoc("note.md", "chosen", "3-winner", { _conflicts: ["2-loser"] });
+  const loser = leafDoc("note.md", "loser", "2-loser");
+  const physical = leafDoc("note.md", "", "2-physical", { _deleted: true, deleted: true, size: 0 });
+  engine.loadPinnedIncomingDoc = async () => winner;
+  engine.loadAllLeafDocs = async () => [winner, loser, physical];
+  engine.publishChosenConflictContent = async () => false;
+  const change = {
+    remoteDoc: winner,
+    path: "note.md",
+    pinnedConflicts: ["2-loser"],
+    conflictRevisions: [{ rev: "3-winner" }, { rev: "2-loser" }],
+  };
+  await assert.rejects(
+    engine.resolveConflictChange(change, { decision: "keep-remote", conflictRevision: "3-winner" }),
+    /could not be published/
+  );
+});
+
+test("mixed reviews show only explicit rows while safe rows auto-apply", async () => {
+  const { engine, files } = fixture();
+  const incoming = [];
+  for (let index = 0; index < 200; index++) {
+    incoming.push(doc(`safe-${index}.md`, `safe body ${index}`));
+  }
+  for (let index = 0; index < 2; index++) {
+    const filePath = `divergent-${index}.md`;
+    files.set(filePath, new TFile(filePath, `local body ${index}`));
+    incoming.push(doc(filePath, `remote body ${index}`));
+  }
+
+  const changes = await engine.prepareIncomingChanges(incoming);
+  assert.equal(changes.length, 202);
+  let reviewed = [];
+  engine.reviewBatch = async (_title, batch) => {
+    reviewed = batch.map((change) => change.path);
+    return engine.acceptAll(batch);
+  };
+  engine.createSnapshot = async () => "snapshot";
+  let applied = 0;
+  engine.applyRemoteChange = async () => { applied += 1; return true; };
+
+  assert.equal(await engine.applyIncomingChangesWithReview(changes, "mixed"), 202);
+  assert.deepEqual(reviewed.sort(), ["divergent-0.md", "divergent-1.md"]);
+  assert.equal(applied, 202);
+});
+
+test("binary fast-forward uses the last-applied identity and saves canonical content", async () => {
+  const { engine, db, files } = fixture();
+  const incoming = { ...doc("image.png", "BAUG"), _rev: "1" };
+  db.docs.set(incoming._id, incoming);
+  files.set("image.png", new TFile("image.png", "", 3));
+  await engine.saveLastAppliedFingerprint("image.png", "AQID");
+  const [prepared] = await engine.prepareLightCandidates([incoming]);
+  assert.equal(prepared.safeFastForward, true);
+  assert.equal(prepared.suggested, "keep-remote");
+  engine.sessionMergeAllowed = true;
+  assert.equal(await engine.applyIncomingChangesWithReview([prepared], "test"), 1);
+  assert.equal(engine.readLastAppliedFingerprint("image.png"), await engine.contentFingerprint("BAUG"));
 });

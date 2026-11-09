@@ -284,6 +284,11 @@ async function modifyNote(instance, rel, content) {
   return evaluate(instance, `(async()=>{const f=app.vault.getAbstractFileByPath(${JSON.stringify(rel)}); if(!f) throw new Error('missing '+${JSON.stringify(rel)}); await app.vault.modify(f, ${JSON.stringify(content)}); return f.path})()`);
 }
 
+async function createBinary(instance, rel, buffer) {
+  const encoded = Buffer.from(buffer).toString("base64");
+  return evaluate(instance, `(async()=>{const p=${JSON.stringify(rel)}; const d=p.split('/').slice(0,-1).join('/'); if(d && !app.vault.getAbstractFileByPath(d)) await app.vault.createFolder(d); const raw=atob(${JSON.stringify(encoded)}); const bytes=Uint8Array.from(raw, ch=>ch.charCodeAt(0)); await app.vault.createBinary(p, bytes.buffer); return p})()`);
+}
+
 async function adapterWrite(instance, rel, content) {
   return evaluate(instance, `(async()=>{const p=${JSON.stringify(rel)}; const d=p.split('/').slice(0,-1).join('/'); if(d) await app.vault.adapter.mkdir(d).catch(()=>{}); await app.vault.adapter.write(p, ${JSON.stringify(content)}); return p})()`);
 }
@@ -801,6 +806,53 @@ async function main() {
     await until("B large file", () => existsSync(path.join(B.vault, "chunks/large.md")), 40000, 250);
     assert.equal(await sha(A, "chunks/large.md"), await sha(B, "chunks/large.md"), "chunked file hash mismatch");
     return { chunks: doc.chunks.length, bytes: Buffer.byteLength(content), encrypted: true };
+  });
+
+  await scenario("unchanged binary attachments do not reappear after restart", async () => {
+    await ensureEngine(A);
+    await ensureEngine(B);
+    const smallPath = "800 Attachments/e2e-stable-small.png";
+    const largePath = "800 Attachments/e2e-stable-chunked.png";
+    const small = Buffer.from(Array.from({ length: 2048 }, (_, index) => index % 251));
+    const large = Buffer.from(Array.from({ length: 90000 }, (_, index) => (index * 17) % 251));
+    await createBinary(A, smallPath, small);
+    await createBinary(A, largePath, large);
+    await waitRemote(couch, smallPath);
+    const largeDoc = await waitRemote(couch, largePath, (doc) => Array.isArray(doc.chunks) && doc.chunks.length > 1);
+    assert.ok(largeDoc.iv, "chunked binary parent was not encrypted");
+    await until("B stable small attachment", () => existsSync(path.join(B.vault, smallPath)), 40000, 250);
+    await until("B stable chunked attachment", () => existsSync(path.join(B.vault, largePath)), 40000, 250);
+    assert.equal(await sha(A, smallPath), await sha(B, smallPath), "small attachment hash mismatch");
+    assert.equal(await sha(A, largePath), await sha(B, largePath), "chunked attachment hash mismatch");
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await evaluate(B, "(async()=>{await app.plugins.plugins.sink.stopSync(); await app.plugins.plugins.sink.startSync(); return true})()");
+      await until(`B binary restart ${attempt + 1}`, () => evaluate(B, "(()=>{const e=app.plugins.plugins.sink.getSyncEngine(); return !!e && !e.startupInProgress})()"), 45000, 250);
+      if (await reviewVisible(B)) {
+        const review = await waitReview(B);
+        assert.equal(review.paths.includes(smallPath), false, `unchanged small attachment reappeared: ${JSON.stringify(review.paths)}`);
+        assert.equal(review.paths.includes(largePath), false, `unchanged chunked attachment reappeared: ${JSON.stringify(review.paths)}`);
+        await cancelReview(B);
+      }
+      assert.equal(await sha(A, smallPath), await sha(B, smallPath));
+      assert.equal(await sha(A, largePath), await sha(B, largePath));
+    }
+    return { restarts: 2, inlineBytes: small.length, chunkedBytes: large.length, recurringRows: 0 };
+  });
+
+  await scenario("snapshot display is limited to five without deleting older snapshots", async () => {
+    await ensureEngine(B);
+    const ids = await evaluate(B, `(async()=>{const e=app.plugins.plugins.sink.getSyncEngine();const p=app.vault.getFiles()[0]?.path;if(!p) throw new Error('no vault file for snapshot fixture');const ids=[];for(let i=0;i<7;i++){ids.push(await e.createSnapshot('e2e retention '+i,[p],'e2e'))}return ids})()`);
+    assert.equal(ids.length, 7);
+    const shown = await evaluate(B, "app.plugins.plugins.sink.getSyncEngine().listSnapshots()");
+    assert.equal(shown.length, 5, `shown ${shown.length} snapshots`);
+    assert.deepEqual([...shown.map((entry) => entry.id)].sort(), [...ids.slice(-5)].sort());
+    const stored = await evaluate(B, "app.plugins.plugins.sink.getSyncEngine().listSnapshots(50)");
+    assert.ok(stored.length >= 7, `stored ${stored.length} snapshots`);
+    assert.deepEqual([...stored.map((entry) => entry.id)].filter((id) => ids.includes(id)).sort(), [...ids].sort());
+    const present = await evaluate(B, `(async()=>{const e=app.plugins.plugins.sink.getSyncEngine();return await Promise.all(${JSON.stringify(ids)}.map(async id=>{try{await e.localDB.instance.get('_local/sink-snapshot:'+id);return true}catch(err){return false}}))})()`);
+    assert.deepEqual(present, ids.map(() => true));
+    return { created: 7, shown: shown.length, stored: stored.length, deleted: 0 };
   });
 
   await scenario("targeted inbound selector: legacy snapshot excluded, files/chunks/devices/tombstones pass, live updates", async () => {

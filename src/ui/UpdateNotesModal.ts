@@ -8,6 +8,17 @@ interface ReleaseNote {
 
 const LATEST_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.2.22",
+    title: "Stable Attachments and Focused Reviews",
+    points: [
+      "Unchanged binary attachments no longer reappear in startup reviews. Inline, chunked, encrypted, and plaintext files use one content identity.",
+      "Binary fast-forward and same-timestamp edits are detected by content, not modification time.",
+      "Startup reviews show only files that need a decision; safe rows apply after approval instead of opening the whole vault.",
+      "Physical CouchDB tombstones no longer block conflict retirement, and large binary bodies are reloaded at apply time.",
+      "Settings shows the 5 most recent snapshots without deleting older stored snapshots.",
+    ],
+  },
+  {
     version: "0.2.21",
     title: "Recovery from Blocked Sync",
     points: [

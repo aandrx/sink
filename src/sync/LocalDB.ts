@@ -199,7 +199,7 @@ export class LocalDB {
     }
   }
 
-  async getSnapshotSummaries(limit = 20): Promise<SnapshotSummary[]> {
+  async getSnapshotSummaries(limit = 5): Promise<SnapshotSummary[]> {
     const index = await this.getLocalDoc<SnapshotIndexDoc>(LocalDB.SNAPSHOT_INDEX_ID);
     const localEntries = Array.isArray(index?.entries) ? index.entries : [];
 
