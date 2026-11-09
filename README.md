@@ -6,7 +6,7 @@ Forked from the architecture of [obsidian-livesync](https://github.com/vrtmrz/ob
 
 ## Release: 0.2.23
 
-Adds a full-screen iOS-style review workspace for Obsidian mobile: file cards, segmented Local/Remote/Skip decisions, a detail sheet with unified diffs, and a safe-area action bar. Desktop keeps the existing side-by-side review. Includes the 0.2.22 attachment-identity and focused-startup-review fixes. See [0.2.23 release notes](docs/releases/0.2.23.md), [0.2.22 notes](docs/releases/0.2.22.md), [0.2.21 notes](docs/releases/0.2.21.md), [0.2.20 notes](docs/releases/0.2.20.md), [0.2.19 notes](docs/releases/0.2.19.md), [0.2.18 notes](docs/releases/0.2.18.md), [0.2.17 notes](docs/releases/0.2.17.md), [0.2.16 notes](docs/releases/0.2.16.md), and [0.2.15 notes](docs/releases/0.2.15.md). Grey-screen crash causality remains unconfirmed; use the [controlled test plan](docs/STABILITY.md) before enabling Sink in a live vault. Development checks require Node.js 22.22.2+ (Node 22 LTS recommended).
+Adds a mobile-specific sync review workspace and includes the 0.2.22 attachment-identity and focused-startup-review fixes. See [0.2.23 release notes](docs/releases/0.2.23.md), [0.2.22 notes](docs/releases/0.2.22.md), [0.2.21 notes](docs/releases/0.2.21.md), [0.2.20 notes](docs/releases/0.2.20.md), [0.2.19 notes](docs/releases/0.2.19.md), [0.2.18 notes](docs/releases/0.2.18.md), [0.2.17 notes](docs/releases/0.2.17.md), [0.2.16 notes](docs/releases/0.2.16.md), and [0.2.15 notes](docs/releases/0.2.15.md). Grey-screen crash causality remains unconfirmed; use the [controlled test plan](docs/STABILITY.md) before enabling Sink in a live vault. Development checks require Node.js 22.22.2+ (Node 22 LTS recommended).
 
 ---
 
@@ -22,18 +22,6 @@ Adds a full-screen iOS-style review workspace for Obsidian mobile: file cards, s
 - **Local safety snapshots** — the five most recent snapshots are shown in Settings; older snapshots remain stored
 - **Setup URI** — share connection settings to new devices in one paste
 - **Compact settings** — ten focused options, no configuration sprawl
-
----
-
-## Mobile review
-
-On Obsidian mobile, a sync review opens as a full-screen workspace instead of the desktop split view. Files are cards with a Local/Remote/Skip control; tapping a card opens a detail sheet with the consequence and a unified diff. Apply stays in a safe-area bottom bar.
-
-| Files | Detail |
-| --- | --- |
-| <img src="https://raw.githubusercontent.com/aandrx/sink/0.2.23/docs/releases/0.2.23/mobile-list-dark.png" width="240" alt="Mobile review file cards in dark theme"> | <img src="https://raw.githubusercontent.com/aandrx/sink/0.2.23/docs/releases/0.2.23/mobile-detail-light.png" width="240" alt="Mobile unified diff detail view in light theme"> |
-
-The decisions are identical to desktop: Local, Remote, and Skip; deletions still require confirmation; blocked rows cannot be applied. Settings and the setup wizard keep Obsidian's native mobile controls. See the [0.2.23 release notes](docs/releases/0.2.23.md) for more mockups.
 
 ---
 
