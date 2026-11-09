@@ -287,6 +287,128 @@ export function renderSplitDiff(container: HTMLElement, leftLabel: string, right
   renderRows();
 }
 
+/** Unified diff for narrow screens: one column, deletes then inserts. */
+export function renderUnifiedDiff(
+	container: HTMLElement,
+	leftLabel: string,
+	rightLabel: string,
+	leftText: string,
+	rightText: string
+): void {
+	let rows: SplitDiffRow[];
+	try {
+		rows = buildSplitDiff(leftText, rightText);
+	} catch {
+		container.createEl("p", { text: "Preview omitted for safety: this diff is too large. Review the files externally, then choose Local, Remote, or Skip." });
+		return;
+	}
+
+	const view = container.createDiv({ cls: "sink-diff-view sink-diff-unified" });
+	view.setAttribute("role", "region");
+	view.setAttribute("aria-label", `${leftLabel} to ${rightLabel} unified comparison`);
+	const toolbar = view.createDiv({ cls: "sink-diff-toolbar" });
+	const removed = rows.filter((row) => row.kind === "delete" || row.kind === "change").length;
+	const added = rows.filter((row) => row.kind === "insert" || row.kind === "change").length;
+	const summary = toolbar.createDiv({ cls: "sink-diff-summary" });
+	if (removed === 0 && added === 0) summary.setText("No differences");
+	else {
+		summary.createSpan({ cls: "sink-diff-count-removed", text: `−${removed} removed` });
+		summary.createSpan({ cls: "sink-diff-count-added", text: `+${added} added` });
+	}
+	const controls = toolbar.createDiv({ cls: "sink-diff-controls" });
+	const contextButton = controls.createEl("button", { text: "Show all lines", cls: "sink-diff-context-button" });
+	contextButton.setAttribute("aria-pressed", "false");
+	const position = controls.createSpan({ cls: "sink-diff-position" });
+	position.setAttribute("aria-live", "polite");
+	const previous = controls.createEl("button", { text: "↑", attr: { "aria-label": "Previous change", title: "Previous change" } });
+	const next = controls.createEl("button", { text: "↓", attr: { "aria-label": "Next change", title: "Next change" } });
+	const scroll = view.createDiv({ cls: "sink-diff-scroll" });
+	scroll.tabIndex = 0;
+	scroll.setAttribute("aria-label", `${leftLabel} and ${rightLabel} unified file contents`);
+	const body = scroll.createDiv({ cls: "sink-diff-lines" });
+
+	const changes = rows
+		.map((row, index) => row.kind !== "equal" && (index === 0 || rows[index - 1].kind === "equal") ? index : -1)
+		.filter((index) => index >= 0);
+	const changeIndexes = new Set(changes);
+	const expanded = new Set<number>();
+	const changeElements = new Map<number, HTMLElement[]>();
+	let showAll = false;
+	let activeChange = -1;
+	previous.disabled = next.disabled = changes.length === 0;
+	position.setText(`${changes.length} change${changes.length === 1 ? "" : "s"}`);
+
+	const createLine = (
+		number: string | undefined,
+		kind: "equal" | "delete" | "insert",
+		text: string | undefined,
+		segments?: DiffSegment[]
+	) => {
+		const line = body.createDiv({ cls: `sink-diff-row sink-diff-${kind}` });
+		line.tabIndex = -1;
+		const gutter = line.createDiv({ cls: "sink-diff-gutter" });
+		gutter.setAttribute("aria-hidden", "true");
+		gutter.createSpan({ cls: "sink-diff-line-number", text: number ?? "" });
+		gutter.createSpan({ cls: "sink-diff-line-marker", text: kind === "delete" ? "−" : kind === "insert" ? "+" : "" });
+		const content = line.createDiv({ cls: "sink-diff-line-text" });
+		if (segments?.length) {
+			for (const segment of segments) content.createSpan({ cls: segment.changed ? "sink-diff-word-change" : "", text: segment.text });
+		} else content.setText(text ?? "");
+		return line;
+	};
+
+	const renderRows = (focusIndex?: number) => {
+		const scrollTop = scroll.scrollTop;
+		body.empty();
+		changeElements.clear();
+		for (const entry of buildDiffDisplayRows(rows, expanded, showAll)) {
+			if (entry.kind === "fold") {
+				const fold = body.createEl("button", { cls: "sink-diff-fold", text: `··· ${entry.count} unchanged lines, expand` });
+				fold.setAttribute("aria-expanded", "false");
+				fold.addEventListener("click", () => {
+					expanded.add(entry.start);
+					renderRows(entry.start);
+				});
+				continue;
+			}
+			const row = entry.row;
+			const elements: HTMLElement[] = [];
+			if (row.kind === "equal") elements.push(createLine(row.rightNumber, "equal", row.rightText));
+			else if (row.kind === "delete") elements.push(createLine(row.leftNumber, "delete", row.leftText, row.leftSegments));
+			else if (row.kind === "insert") elements.push(createLine(row.rightNumber, "insert", row.rightText, row.rightSegments));
+			else {
+				elements.push(createLine(row.leftNumber, "delete", row.leftText, row.leftSegments));
+				elements.push(createLine(row.rightNumber, "insert", row.rightText, row.rightSegments));
+			}
+			if (changeIndexes.has(entry.index)) {
+				changeElements.set(entry.index, elements);
+				if (entry.index === changes[activeChange]) elements.forEach((element) => element.addClass("sink-diff-current-change"));
+			}
+		}
+		scroll.scrollTop = scrollTop;
+		if (focusIndex !== undefined) (changeElements.get(focusIndex)?.[0] ?? scroll).focus();
+	};
+
+	contextButton.addEventListener("click", () => {
+		showAll = !showAll;
+		contextButton.setText(showAll ? "Collapse unchanged" : "Show all lines");
+		contextButton.setAttribute("aria-pressed", String(showAll));
+		renderRows();
+	});
+	const navigate = (direction: number) => {
+		if (changes.length === 0) return;
+		changeElements.get(changes[activeChange])?.forEach((element) => element.removeClass("sink-diff-current-change"));
+		activeChange = activeChange < 0 ? (direction > 0 ? 0 : changes.length - 1) : (activeChange + direction + changes.length) % changes.length;
+		const elements = changeElements.get(changes[activeChange]);
+		elements?.forEach((element) => element.addClass("sink-diff-current-change"));
+		if (elements?.[0]) scroll.scrollTop = Math.max(0, elements[0].offsetTop - 24);
+		position.setText(`Change ${activeChange + 1} of ${changes.length}`);
+	};
+	previous.addEventListener("click", () => navigate(-1));
+	next.addEventListener("click", () => navigate(1));
+	renderRows();
+}
+
 export function openSplitDiffModal(
   app: App,
   title: string,

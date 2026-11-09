@@ -1,6 +1,6 @@
-import { App, Modal } from "obsidian";
+import { App, Modal, Platform } from "obsidian";
 import type { ChangeDecision, ConflictRevision, PendingChange, ReviewResult, ReviewedChange } from "../settings";
-import { renderSplitDiff } from "./DiffView";
+import { renderSplitDiff, renderUnifiedDiff } from "./DiffView";
 
 const PAGE_SIZE = 25;
 let modalSequence = 0;
@@ -161,6 +161,11 @@ export class BatchReviewModal extends Modal {
 	private nextButton: HTMLButtonElement | null = null;
 	private readonly rowEls = new Map<string, HTMLElement>();
 	private readonly applyButtons: HTMLButtonElement[] = [];
+	private readonly mobile = Platform.isMobile;
+	private mobileDetailOpen = false;
+	private mobileSummaryEl: HTMLElement | null = null;
+	private workspaceEl: HTMLElement | null = null;
+	private filesEl: HTMLElement | null = null;
 
 	constructor(app: App, title: string, changes: PendingChange[], resolver: (result: ReviewResult) => void) {
 		super(app);
@@ -185,14 +190,72 @@ export class BatchReviewModal extends Modal {
 	onOpen(): void {
 		this.closed = false;
 		this.modalEl.addClass("mod-sink-wide");
+		if (this.mobile) this.modalEl.addClass("mod-sink-mobile");
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.addClass("sink-conflict-modal", "sink-review-modal");
+		if (this.mobile) contentEl.addClass("sink-review-mobile");
 		const titleId = `sink-review-title-${++modalSequence}`;
 		this.modalEl.setAttribute("aria-labelledby", titleId);
 		contentEl.setAttribute("aria-labelledby", titleId);
 
 		const workspace = contentEl.createDiv({ cls: "sink-review-workspace" });
+		this.workspaceEl = workspace;
+		const heading = this.mobile
+			? this.renderMobileHeader(workspace, titleId)
+			: this.renderDesktopHeader(workspace, titleId);
+		if (this.mobile) this.renderMobileToolbar(workspace);
+		else this.renderDesktopToolbar(workspace, titleId);
+
+		const body = workspace.createDiv({ cls: "sink-review-body" });
+		const files = body.createDiv({ cls: "sink-review-files" });
+		this.filesEl = files;
+		files.createEl("h3", { text: "Files in this operation", cls: "sink-review-section-title" });
+		this.listEl = files.createDiv({
+			cls: "sink-review-file-list",
+			attr: { role: "list", "aria-label": "Files in this sync operation" },
+		});
+		const pager = files.createDiv({ cls: "sink-review-pager" });
+		this.previousButton = pager.createEl("button", { text: "Previous", attr: { "aria-label": "Previous page of files" } });
+		this.previousButton.addEventListener("click", () => this.setPage(this.page - 1));
+		this.pageStatusEl = pager.createSpan({ cls: "sink-review-page-status" });
+		this.pageStatusEl.setAttribute("aria-live", "polite");
+		this.nextButton = pager.createEl("button", { text: "Next", attr: { "aria-label": "Next page of files" } });
+		this.nextButton.addEventListener("click", () => this.setPage(this.page + 1));
+
+		const preview = body.createDiv({ cls: "sink-review-preview" });
+		preview.setAttribute("role", "region");
+		preview.setAttribute("aria-label", "Selected file preview");
+		this.previewEl = preview.createDiv({ cls: "sink-review-preview-content" });
+
+		this.renderFooter(workspace);
+
+		this.previewEl.addEventListener("keydown", (event) => {
+			if (event.key !== "Escape") return;
+			const row = this.activePath ? this.rowEls.get(this.activePath) : null;
+			const button = row?.querySelector<HTMLElement>(".sink-review-file-path");
+			if (!button) return;
+			event.preventDefault();
+			event.stopPropagation();
+			button.focus();
+		});
+
+		if (this.mobile) {
+			workspace.addEventListener("keydown", (event) => {
+				if (event.key !== "Escape" || !this.mobileDetailOpen) return;
+				event.preventDefault();
+				event.stopPropagation();
+				this.closeMobileDetail();
+			}, true);
+		}
+
+		this.renderList();
+		this.diffOpen = false;
+		this.renderPreview(this.activePath ? this.changesByPath.get(this.activePath) ?? null : null, false);
+		heading.focus();
+	}
+
+	private renderDesktopHeader(workspace: HTMLElement, titleId: string): HTMLElement {
 		const header = workspace.createDiv({ cls: "sink-review-header" });
 		const heading = header.createEl("h2", { text: this.title, attr: { id: titleId } });
 		heading.tabIndex = -1;
@@ -205,7 +268,21 @@ export class BatchReviewModal extends Modal {
 			cls: "setting-item-description sink-review-summary",
 		});
 		this.selectionEl = summary.createSpan({ cls: "sink-review-selection-count" });
+		return heading;
+	}
 
+	private renderMobileHeader(workspace: HTMLElement, titleId: string): HTMLElement {
+		const header = workspace.createDiv({ cls: "sink-review-mobile-header" });
+		const titleRow = header.createDiv({ cls: "sink-review-mobile-title-row" });
+		const heading = titleRow.createEl("h2", { text: this.title, attr: { id: titleId } });
+		heading.tabIndex = -1;
+		const cancel = titleRow.createEl("button", { text: "Cancel", cls: "sink-review-mobile-cancel" });
+		cancel.addEventListener("click", () => this.cancel());
+		this.mobileSummaryEl = header.createEl("p", { cls: "sink-review-mobile-summary", attr: { "aria-live": "polite" } });
+		return heading;
+	}
+
+	private renderDesktopToolbar(workspace: HTMLElement, titleId: string): void {
 		const toolbar = workspace.createDiv({ cls: "sink-review-toolbar" });
 		const selectionButtons = toolbar.createDiv({ cls: "sink-review-toolbar-group" });
 		const selectAll = selectionButtons.createEl("button", { text: "Select all" });
@@ -233,30 +310,34 @@ export class BatchReviewModal extends Modal {
 			if (value) this.applyDecisionToSelected(value);
 			bulkSelect.value = "";
 		});
+	}
 
-		const body = workspace.createDiv({ cls: "sink-review-body" });
-		const files = body.createDiv({ cls: "sink-review-files" });
-		files.createEl("h3", { text: "Files in this operation", cls: "sink-review-section-title" });
-		this.listEl = files.createDiv({
-			cls: "sink-review-file-list",
-			attr: { role: "list", "aria-label": "Files in this sync operation" },
+	private renderMobileToolbar(workspace: HTMLElement): void {
+		const toolbar = workspace.createDiv({
+			cls: "sink-review-mobile-bulk",
+			attr: { role: "toolbar", "aria-label": "Apply a decision to every file" },
 		});
-		const pager = files.createDiv({ cls: "sink-review-pager" });
-		this.previousButton = pager.createEl("button", { text: "Previous", attr: { "aria-label": "Previous page of files" } });
-		this.previousButton.addEventListener("click", () => this.setPage(this.page - 1));
-		this.pageStatusEl = pager.createSpan({ cls: "sink-review-page-status" });
-		this.pageStatusEl.setAttribute("aria-live", "polite");
-		this.nextButton = pager.createEl("button", { text: "Next", attr: { "aria-label": "Next page of files" } });
-		this.nextButton.addEventListener("click", () => this.setPage(this.page + 1));
+		const actions: Array<{ label: string; decision: SupportedDecision | "reset" }> = [
+			{ label: "All local", decision: "keep-local" },
+			{ label: "All remote", decision: "keep-remote" },
+			{ label: "Skip all", decision: "skip" },
+			{ label: "Suggested", decision: "reset" },
+		];
+		for (const action of actions) {
+			const button = toolbar.createEl("button", { text: action.label, cls: "sink-review-mobile-bulk-button" });
+			button.addEventListener("click", () => {
+				if (action.decision === "reset") this.resetToSuggested();
+				else this.applyDecisionToAll(action.decision);
+			});
+		}
+	}
 
-		const preview = body.createDiv({ cls: "sink-review-preview" });
-		preview.setAttribute("role", "region");
-		preview.setAttribute("aria-label", "Selected file preview");
-		this.previewEl = preview.createDiv({ cls: "sink-review-preview-content" });
-
-		const footer = workspace.createDiv({ cls: "sink-review-footer" });
+	private renderFooter(workspace: HTMLElement): void {
+		const footer = workspace.createDiv({ cls: `sink-review-footer${this.mobile ? " sink-review-mobile-footer" : ""}` });
 		this.footerNoteEl = footer.createEl("p", {
-			text: "Apply writes the decisions for every selected file in one operation.",
+			text: this.mobile
+				? "Apply writes every Local and Remote choice in one operation."
+				: "Apply writes the decisions for every selected file in one operation.",
 			cls: "setting-item-description sink-review-footer-note",
 		});
 		this.bulkNoticeEl = footer.createEl("p", {
@@ -264,26 +345,13 @@ export class BatchReviewModal extends Modal {
 			attr: { "aria-live": "polite" },
 		});
 		const actions = footer.createDiv({ cls: "sink-review-footer-actions" });
-		const cancelButton = actions.createEl("button", { text: "Cancel" });
-		cancelButton.addEventListener("click", () => this.cancel());
+		if (!this.mobile) {
+			const cancelButton = actions.createEl("button", { text: "Cancel" });
+			cancelButton.addEventListener("click", () => this.cancel());
+		}
 		const applyButton = actions.createEl("button", { text: "Apply selected", cls: "mod-cta sink-review-apply" });
 		applyButton.addEventListener("click", () => this.applySelected());
 		this.applyButtons.push(applyButton);
-
-		this.previewEl.addEventListener("keydown", (event) => {
-			if (event.key !== "Escape") return;
-			const row = this.activePath ? this.rowEls.get(this.activePath) : null;
-			const button = row?.querySelector<HTMLElement>(".sink-review-file-path");
-			if (!button) return;
-			event.preventDefault();
-			event.stopPropagation();
-			button.focus();
-		});
-
-		this.renderList();
-		this.diffOpen = false;
-		this.renderPreview(this.activePath ? this.changesByPath.get(this.activePath) ?? null : null, false);
-		heading.focus();
 	}
 
 	onClose(): void {
@@ -341,8 +409,10 @@ export class BatchReviewModal extends Modal {
 	}
 
 	private createRow(parent: HTMLElement, change: PendingChange): HTMLElement {
+		if (this.mobile) return this.createMobileRow(parent, change);
 		const state = this.states.get(change.path) ?? createRowState(change);
 		const row = parent.createDiv({ cls: "sink-review-file-row" });
+		row.dataset.path = change.path;
 		row.setAttribute("role", "listitem");
 		if (change.path === this.activePath) row.addClass("is-active");
 		row.addEventListener("click", (event) => {
@@ -414,6 +484,154 @@ export class BatchReviewModal extends Modal {
 		return row;
 	}
 
+	/** iOS-style card: one tap opens the file detail, the segmented control sets the side. */
+	private createMobileRow(parent: HTMLElement, change: PendingChange): HTMLElement {
+		const state = this.states.get(change.path) ?? createRowState(change);
+		const row = parent.createDiv({ cls: "sink-review-file-row sink-review-file-card" });
+		row.dataset.path = change.path;
+		row.setAttribute("role", "listitem");
+		if (change.blockedReason) row.addClass("is-blocked");
+		row.addEventListener("click", (event) => {
+			const target = event.target as HTMLElement | null;
+			if (target?.closest("button")) return;
+			this.openMobileDetail(change.path);
+		});
+
+		const main = row.createDiv({ cls: "sink-review-mobile-card-main" });
+		const top = main.createDiv({ cls: "sink-review-mobile-card-top" });
+		const pathButton = top.createEl("button", {
+			text: change.path,
+			cls: "sink-review-file-path",
+			attr: { title: change.path },
+		});
+		pathButton.addEventListener("click", (event) => {
+			event.stopPropagation();
+			this.openMobileDetail(change.path);
+		});
+		const chevron = top.createSpan({ cls: "sink-review-mobile-chevron", text: "›" });
+		chevron.setAttribute("aria-hidden", "true");
+
+		const meta = this.describeMobileChange(change);
+		if (meta) main.createDiv({ cls: "sink-review-file-meta", text: meta });
+		if (change.blockedReason) {
+			main.createDiv({ cls: "sink-review-mobile-blocked", text: change.blockedReason });
+		} else {
+			this.renderDecisionSegments(main, change, state);
+		}
+
+		this.rowEls.set(change.path, row);
+		return row;
+	}
+
+	private renderDecisionSegments(parent: HTMLElement, change: PendingChange, state: RowState): HTMLElement {
+		const segments = parent.createDiv({
+			cls: "sink-review-mobile-segments",
+			attr: { role: "group", "aria-label": `Decision for ${change.path}` },
+		});
+		for (const value of ["keep-local", "keep-remote", "skip"] as const) {
+			const label = value === "keep-remote" && serverAbsent(change)
+				? `${DECISION_LABELS[value]} (none)`
+				: DECISION_LABELS[value];
+			const button = segments.createEl("button", {
+				text: label,
+				cls: "sink-review-mobile-segment",
+				attr: { type: "button" },
+			});
+			button.dataset.decision = value;
+			const available = value === "keep-local"
+				? canKeepLocal(change)
+				: value === "keep-remote"
+					? canKeepRemote(change)
+					: true;
+			button.disabled = !available;
+			const selected = state.decision === value;
+			button.setAttribute("aria-pressed", String(selected));
+			if (selected) button.addClass("is-selected");
+			button.addEventListener("click", (event) => {
+				event.stopPropagation();
+				this.setMobileDecision(change, value);
+			});
+		}
+		return segments;
+	}
+
+	private describeMobileChange(change: PendingChange): string {
+		const revisions = getConflictRevisions(change);
+		if (change.blockedReason) return revisions ? retainedLabel(revisions.length) : "";
+		const parts: string[] = [];
+		if (serverAbsent(change)) parts.push("No remote version");
+		else if (change.remoteDeleted) parts.push("Remote deleted");
+		else parts.push(`Remote ${this.mobileDate(change.remoteMtime)}`);
+		if (!change.localExists) parts.push("Not local");
+		else if (change.localMtime) parts.push(`Local ${this.mobileDate(change.localMtime)}`);
+		if (revisions) parts.push(retainedLabel(revisions.length));
+		return parts.join(" • ");
+	}
+
+	/** The detail header keeps only context the diff and consequence do not repeat. */
+	private describeMobileDetail(change: PendingChange): string {
+		const revisions = getConflictRevisions(change);
+		const parts: string[] = [];
+		if (change.blockedReason) parts.push("Blocked");
+		if (revisions) parts.push(retainedLabel(revisions.length));
+		return parts.join(" • ");
+	}
+
+	private mobileDate(ms: number): string {
+		const date = new Date(ms);
+		const now = new Date();
+		const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+		if (ms >= today) return `today ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+		if (ms >= today - 86_400_000) return "yesterday";
+		return date.toLocaleDateString();
+	}
+
+	private setMobileDecision(change: PendingChange, decision: SupportedDecision): void {
+		const state = this.states.get(change.path) ?? createRowState(change);
+		setRowDecision(change, state, decision);
+		state.selected = !change.blockedReason;
+		this.states.set(change.path, state);
+		this.clearBulkNotice();
+		this.updateDecisionControls(change);
+		this.updateSelectionSummary();
+		if (change.path === this.activePath) {
+			this.updateActiveConsequence();
+			this.syncConflictSelection(change);
+		}
+	}
+
+	private updateDecisionControls(change: PendingChange): void {
+		const state = this.states.get(change.path);
+		if (!state) return;
+		for (const host of [this.rowEls.get(change.path), this.previewEl]) {
+			host?.querySelectorAll<HTMLButtonElement>(".sink-review-mobile-segment").forEach((button) => {
+				const selected = button.dataset.decision === state.decision;
+				button.setAttribute("aria-pressed", String(selected));
+				button.toggleClass("is-selected", selected);
+			});
+		}
+	}
+
+	private openMobileDetail(path: string): void {
+		this.mobileDetailOpen = true;
+		this.workspaceEl?.addClass("is-detail-open");
+		this.setActive(path, true, true);
+	}
+
+	private closeMobileDetail(): void {
+		if (!this.mobileDetailOpen) return;
+		this.mobileDetailOpen = false;
+		this.diffOpen = false;
+		this.previewToken++;
+		this.workspaceEl?.removeClass("is-detail-open");
+		if (this.filesEl) {
+			this.filesEl.inert = false;
+			this.filesEl.removeAttribute("aria-hidden");
+		}
+		const row = this.activePath ? this.rowEls.get(this.activePath) : null;
+		row?.querySelector<HTMLElement>(".sink-review-file-path")?.focus();
+	}
+
 	private setPage(page: number): void {
 		const pageCount = Math.max(1, Math.ceil(this.changes.length / PAGE_SIZE));
 		this.page = Math.min(Math.max(0, page), pageCount - 1);
@@ -434,25 +652,40 @@ export class BatchReviewModal extends Modal {
 		const start = total === 0 ? 0 : this.page * PAGE_SIZE + 1;
 		const end = Math.min(total, (this.page + 1) * PAGE_SIZE);
 		if (this.pageStatusEl) {
-			this.pageStatusEl.setText(total === 0 ? "No files" : `Page ${this.page + 1} of ${pageCount} • ${start}-${end} of ${total}`);
+			this.pageStatusEl.setText(total === 0
+				? "No files"
+				: this.mobile
+					? `${start}–${end} of ${total}`
+					: `Page ${this.page + 1} of ${pageCount} • ${start}-${end} of ${total}`);
 		}
 		if (this.previousButton) this.previousButton.disabled = this.page <= 0;
 		if (this.nextButton) this.nextButton.disabled = this.page >= pageCount - 1;
+		const pager = this.previousButton?.parentElement;
+		if (pager && this.mobile) pager.style.display = pageCount <= 1 ? "none" : "flex";
 	}
 
 	private updateSelectionSummary(): void {
-		if (!this.selectionEl) return;
 		const blocked = this.changes.filter((change) => change.blockedReason).length;
 		const selectable = this.changes.length - blocked;
 		const selected = this.changes.filter((change) => !change.blockedReason && this.states.get(change.path)?.selected).length;
 		const counts = this.selectionCounts();
 		const effective = counts.total;
-		const parts = [effective !== selected
-			? ` • ${selected} selected • ${effective} applicable`
-			: ` • ${effective} of ${selectable} applicable`];
-		if (blocked > 0) parts.push(`${blocked} blocked`);
-		this.selectionEl.setText(parts.join(" • "));
-		for (const button of this.applyButtons) button.disabled = this.submitting || counts.total === 0;
+		if (this.selectionEl) {
+			const parts = [effective !== selected
+				? ` • ${selected} selected • ${effective} applicable`
+				: ` • ${effective} of ${selectable} applicable`];
+			if (blocked > 0) parts.push(`${blocked} blocked`);
+			this.selectionEl.setText(parts.join(" • "));
+		}
+		if (this.mobileSummaryEl) {
+			const parts = [fileCount(this.changes.length), `${effective} to apply`];
+			if (blocked > 0) parts.push(`${blocked} blocked`);
+			this.mobileSummaryEl.setText(parts.join(" • "));
+		}
+		for (const button of this.applyButtons) {
+			button.disabled = this.submitting || counts.total === 0;
+			if (this.mobile) button.setText(counts.total === 0 ? "Apply" : `Apply ${counts.total}`);
+		}
 		this.footerNoteEl?.setText(this.footerSummary(counts));
 	}
 
@@ -518,13 +751,24 @@ export class BatchReviewModal extends Modal {
 	private setActive(path: string, moveFocus: boolean, openDiff = false): void {
 		this.activePath = path;
 		this.diffOpen = openDiff;
+		if (this.mobile) {
+			this.mobileDetailOpen = openDiff;
+			if (openDiff) this.workspaceEl?.addClass("is-detail-open");
+			else this.workspaceEl?.removeClass("is-detail-open");
+			if (this.filesEl) {
+				this.filesEl.inert = openDiff;
+				if (openDiff) this.filesEl.setAttribute("aria-hidden", "true");
+				else this.filesEl.removeAttribute("aria-hidden");
+			}
+		}
 		for (const [rowPath, row] of this.rowEls) {
 			const active = rowPath === path;
-			if (active) row.addClass("is-active");
+			if (this.mobile) row.removeClass("is-active");
+			else if (active) row.addClass("is-active");
 			else row.removeClass("is-active");
 			const button = row.querySelector<HTMLElement>(".sink-review-file-path");
 			if (button) {
-				if (active) button.setAttribute("aria-current", "true");
+				if (active && !this.mobile) button.setAttribute("aria-current", "true");
 				else button.removeAttribute("aria-current");
 			}
 		}
@@ -549,19 +793,34 @@ export class BatchReviewModal extends Modal {
 			return;
 		}
 
+		if (this.mobile) {
+			const nav = host.createDiv({ cls: "sink-review-mobile-detail-nav" });
+			const back = nav.createEl("button", { text: "‹ Files", cls: "sink-review-mobile-back" });
+			back.addEventListener("click", () => this.closeMobileDetail());
+			nav.createSpan({ cls: "sink-review-mobile-detail-label", text: "File detail" });
+		}
+
 		const header = host.createDiv({ cls: "sink-review-preview-header" });
 		const heading = header.createEl("h3", { text: change.path });
 		heading.tabIndex = -1;
 		this.previewHeadingEl = heading;
 		if (moveFocus) heading.focus();
+		const detailMeta = this.mobile ? this.describeMobileDetail(change) : this.describeChange(change);
 		header.createEl("p", {
-			text: `Source device ${change.sourceDevice} • ${this.describeChange(change)}`,
+			text: this.mobile
+				? `From ${change.sourceDevice}${detailMeta ? ` • ${detailMeta}` : ""}`
+				: `Source device ${change.sourceDevice} • ${detailMeta}`,
 			cls: "setting-item-description",
 		});
+
+		if (this.mobile && this.diffOpen && !change.blockedReason) {
+			this.renderDecisionSegments(host, change, this.states.get(change.path) ?? createRowState(change));
+		}
 
 		this.consequenceEl = host.createDiv({ cls: "sink-review-consequence" });
 		this.consequenceEl.setAttribute("aria-live", "polite");
 		this.updateActiveConsequence();
+		this.updateDecisionControls(change);
 
 		if (!this.diffOpen) {
 			const collapsed = host.createDiv({ cls: "sink-review-preview-body" });
@@ -609,7 +868,7 @@ export class BatchReviewModal extends Modal {
 					this.renderPreviewError(body, change, "the preview returned no text");
 					return;
 				}
-				renderSplitDiff(body, "Local", "Remote", content.localContent, content.remoteContent);
+				this.renderComparison(body, "Local", "Remote", content.localContent, content.remoteContent);
 			}).catch((error) => {
 				if (token !== this.previewToken || this.closed || !this.previewEl) return;
 				status.remove();
@@ -625,7 +884,13 @@ export class BatchReviewModal extends Modal {
 			});
 			return;
 		}
-		renderSplitDiff(body, "Local", "Remote", change.localContent ?? "", change.remoteContent ?? "");
+		this.renderComparison(body, "Local", "Remote", change.localContent ?? "", change.remoteContent ?? "");
+	}
+
+	/** The detail view is a full-width unified diff on mobile. */
+	private renderComparison(host: HTMLElement, leftLabel: string, rightLabel: string, leftText: string, rightText: string): void {
+		if (this.mobile) renderUnifiedDiff(host, leftLabel, rightLabel, leftText, rightText);
+		else renderSplitDiff(host, leftLabel, rightLabel, leftText, rightText);
 	}
 
 	private renderAbsentServerPreview(host: HTMLElement, change: PendingChange): void {
@@ -645,10 +910,12 @@ export class BatchReviewModal extends Modal {
 		const revisions = getConflictRevisions(change);
 		if (!revisions) return;
 		const body = host.createDiv({ cls: "sink-review-preview-body" });
-		body.createEl("p", {
-			text: "Retained remote revisions. Applying a side resolves this conflict intentionally: the remote revisions that are not chosen are retired, and any backup is stored locally on this device only.",
-			cls: "sink-review-notice",
-		});
+		if (!this.mobile) {
+			body.createEl("p", {
+				text: "Retained remote revisions. Applying a side resolves this conflict intentionally: the remote revisions that are not chosen are retired, and any backup is stored locally on this device only.",
+				cls: "sink-review-notice",
+			});
+		}
 
 		const controls = body.createDiv({ cls: "sink-review-conflict-controls" });
 		const selectId = `sink-review-revision-${++modalSequence}`;
@@ -716,7 +983,7 @@ export class BatchReviewModal extends Modal {
 				this.renderConflictLeafError(host, change, "the preview returned no text");
 				return;
 			}
-			renderSplitDiff(host, "Local", "Remote", content.localContent, content.remoteContent);
+			this.renderComparison(host, "Local", "Remote", content.localContent, content.remoteContent);
 		}).catch((error) => {
 			if (token !== this.previewToken || this.closed || !this.previewEl) return;
 			status.remove();
@@ -747,7 +1014,7 @@ export class BatchReviewModal extends Modal {
 				text: "Showing the preview data already provided for this review.",
 				cls: "setting-item-description",
 			});
-			renderSplitDiff(body, "Local", "Remote", change.localContent ?? "", change.remoteContent ?? "");
+			this.renderComparison(body, "Local", "Remote", change.localContent ?? "", change.remoteContent ?? "");
 		}
 		const retry = body.createEl("button", { text: "Retry preview", cls: "sink-review-retry" });
 		retry.addEventListener("click", () => {
@@ -859,6 +1126,48 @@ export class BatchReviewModal extends Modal {
 		}
 		this.renderList();
 		this.updateBulkNotice(decision, blocked, unavailable);
+		this.updateActiveConsequence();
+		const active = this.activePath ? this.changesByPath.get(this.activePath) : undefined;
+		if (active) this.syncConflictSelection(active);
+	}
+
+	/** Mobile bulk actions apply to every file, so no row is left staged invisibly. */
+	private applyDecisionToAll(decision: SupportedDecision): void {
+		let blocked = 0;
+		let unavailable = 0;
+		for (const change of this.changes) {
+			const state = this.states.get(change.path) ?? createRowState(change);
+			if (change.blockedReason) {
+				state.selected = false;
+				blocked++;
+				this.states.set(change.path, state);
+				continue;
+			}
+			if (decision === "keep-local" && !canKeepLocal(change)) {
+				unavailable++;
+				continue;
+			}
+			if (decision === "keep-remote" && !canKeepRemote(change)) {
+				unavailable++;
+				continue;
+			}
+			state.selected = true;
+			setRowDecision(change, state, decision);
+			this.states.set(change.path, state);
+		}
+		this.renderList();
+		this.updateBulkNotice(decision, blocked, unavailable);
+		this.updateActiveConsequence();
+		const active = this.activePath ? this.changesByPath.get(this.activePath) : undefined;
+		if (active) this.syncConflictSelection(active);
+	}
+
+	private resetToSuggested(): void {
+		for (const change of this.changes) {
+			this.states.set(change.path, createRowState(change));
+		}
+		this.clearBulkNotice();
+		this.renderList();
 		this.updateActiveConsequence();
 		const active = this.activePath ? this.changesByPath.get(this.activePath) : undefined;
 		if (active) this.syncConflictSelection(active);

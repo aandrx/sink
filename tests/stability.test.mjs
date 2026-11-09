@@ -179,6 +179,7 @@ class MockDB {
 const obsidian = {
   TFile, TAbstractFile: class {}, Modal, Plugin, App: class {},
   Notice: class {}, PluginSettingTab: class {}, Setting: class {}, setTooltip() {},
+  Platform: { isMobile: false, isDesktop: true, isIosApp: false },
 };
 function loadTS(relative) {
   const filename = path.resolve(root, relative);

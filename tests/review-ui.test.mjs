@@ -59,7 +59,7 @@ class Modal {
     this.modalEl.remove();
   }
 }
-const obsidian = { App, Modal, Setting: class {} };
+const obsidian = { App, Modal, Setting: class {}, Platform: { isMobile: false, isDesktop: true, isIosApp: false } };
 
 function loadTS(relative) {
   const filename = path.resolve(root, relative);
@@ -80,7 +80,7 @@ function loadTS(relative) {
 
 const { BatchReviewModal } = loadTS("src/ui/BatchReviewModal.ts");
 const { ConflictModal } = loadTS("src/ui/ConflictModal.ts");
-const { renderSplitDiff } = loadTS("src/ui/DiffView.ts");
+const { renderSplitDiff, renderUnifiedDiff } = loadTS("src/ui/DiffView.ts");
 
 const app = new App();
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -107,6 +107,15 @@ function openBatch(changes, title = "Review sync operation") {
   const modal = new BatchReviewModal(app, title, changes, (result) => results.push(result));
   modal.open();
   return { modal, results };
+}
+
+function openMobileBatch(changes, title = "Review sync operation") {
+  obsidian.Platform.isMobile = true;
+  try {
+    return openBatch(changes, title);
+  } finally {
+    obsidian.Platform.isMobile = false;
+  }
 }
 
 function openRow(modal, index = 0) {
@@ -984,6 +993,165 @@ test("fold labels have no em dash and expanding restores focus to the first reve
     assert.ok(leftPane.contains(focused));
     assert.equal(focused.classList.contains("sink-diff-row"), true);
     assert.match(focused.textContent, /line 3/);
+  } finally {
+    container.remove();
+  }
+});
+
+test("mobile review renders iOS cards and segmented decisions instead of desktop controls", () => {
+  const changes = [change("note.md"), change("800 Attachments/image.png", { isBinary: true })];
+  const { modal } = openMobileBatch(changes);
+  try {
+    assert.equal(modal.modalEl.classList.contains("mod-sink-mobile"), true);
+    assert.equal(modal.contentEl.classList.contains("sink-review-mobile"), true);
+    assert.equal(rows(modal).length, 2);
+    assert.equal(modal.contentEl.querySelectorAll(".sink-review-file-select").length, 0);
+    assert.equal(modal.contentEl.querySelectorAll(".sink-review-decision").length, 0);
+    assert.equal(modal.contentEl.querySelectorAll(".sink-review-mobile-segment").length, 6);
+    assert.equal(modal.contentEl.querySelector(".sink-review-mobile-header") !== null, true);
+    assert.equal(modal.contentEl.querySelector(".sink-review-mobile-summary").textContent, "2 files • 2 to apply");
+    assert.equal(modal.contentEl.querySelector(".sink-review-apply").textContent, "Apply 2");
+    assert.equal(modal.contentEl.querySelector(".sink-review-workspace").classList.contains("is-detail-open"), false);
+  } finally {
+    modal.close();
+  }
+});
+
+test("mobile segmented control updates the effective count and apply decisions", () => {
+  const changes = [change("one.md"), change("two.md")];
+  const { modal, results } = openMobileBatch(changes);
+  try {
+    const first = rows(modal)[0];
+    first.querySelector('[data-decision="keep-local"]').click();
+    assert.equal(first.querySelector('[data-decision="keep-local"]').getAttribute("aria-pressed"), "true");
+    assert.equal(modal.contentEl.querySelector(".sink-review-mobile-summary").textContent, "2 files • 2 to apply");
+
+    first.querySelector('[data-decision="skip"]').click();
+    assert.equal(modal.contentEl.querySelector(".sink-review-mobile-summary").textContent, "2 files • 1 to apply");
+    assert.equal(modal.contentEl.querySelector(".sink-review-apply").textContent, "Apply 1");
+
+    modal.contentEl.querySelector(".sink-review-apply").click();
+    assert.equal(results.length, 1);
+    assert.deepEqual(results[0].decisions.map((entry) => [entry.path, entry.decision]), [
+      ["one.md", "skip"],
+      ["two.md", "keep-remote"],
+    ]);
+  } finally {
+    modal.close();
+  }
+});
+
+test("mobile detail sheet opens with a unified diff, decision control, and back navigation", () => {
+  const { modal } = openMobileBatch([change("note.md")]);
+  try {
+    rows(modal)[0].querySelector(".sink-review-file-path").click();
+    const workspace = modal.contentEl.querySelector(".sink-review-workspace");
+    assert.equal(workspace.classList.contains("is-detail-open"), true);
+    assert.equal(modal.contentEl.querySelector(".sink-review-mobile-detail-nav") !== null, true);
+    assert.equal(modal.contentEl.querySelector(".sink-diff-unified") !== null, true);
+    assert.equal(modal.contentEl.querySelectorAll(".sink-review-mobile-segment").length, 6);
+    const files = modal.contentEl.querySelector(".sink-review-files");
+    assert.equal(files.inert, true);
+    assert.equal(files.getAttribute("aria-hidden"), "true");
+
+    const detailLocal = modal.contentEl.querySelector('.sink-review-preview [data-decision="keep-local"]');
+    detailLocal.click();
+    assert.equal(detailLocal.getAttribute("aria-pressed"), "true");
+    assert.equal(rows(modal)[0].querySelector('[data-decision="keep-local"]').getAttribute("aria-pressed"), "true");
+
+    modal.contentEl.querySelector(".sink-review-mobile-back").click();
+    assert.equal(workspace.classList.contains("is-detail-open"), false);
+    assert.equal(files.inert, false);
+    assert.equal(files.hasAttribute("aria-hidden"), false);
+  } finally {
+    modal.close();
+  }
+});
+
+test("mobile conflict detail keeps revision selection and a unified diff", async () => {
+  const revisions = [
+    { rev: "3-phone", mtime: Date.now(), deleted: false, isBinary: false, size: 10, deviceName: "phone" },
+    { rev: "2-laptop", mtime: Date.now() - 1000, deleted: false, isBinary: false, size: 10, deviceName: "laptop" },
+  ];
+  const conflict = change("conflict.md", {
+    conflictRevisions: revisions,
+    conflictRevision: "3-phone",
+    suggested: "keep-local",
+    loadConflictPreview: async (rev) => ({ localContent: `local ${rev}`, remoteContent: `remote ${rev}` }),
+  });
+  const { modal, results } = openMobileBatch([conflict]);
+  try {
+    rows(modal)[0].querySelector(".sink-review-file-path").click();
+    await settle();
+    await settle();
+    const select = modal.contentEl.querySelector(".sink-review-revision-select");
+    assert.equal(select !== null, true);
+    assert.equal(select.value, "3-phone");
+    assert.equal(modal.contentEl.querySelector(".sink-diff-unified") !== null, true);
+
+    modal.contentEl.querySelector('.sink-review-preview [data-decision="keep-remote"]').click();
+    select.value = "2-laptop";
+    select.dispatchEvent(event("change"));
+    await settle();
+    modal.contentEl.querySelector(".sink-review-apply").click();
+    assert.equal(results.length, 1);
+    assert.equal(results[0].decisions[0].decision, "keep-remote");
+    assert.equal(results[0].decisions[0].conflictRevision, "2-laptop");
+  } finally {
+    modal.close();
+  }
+});
+
+test("mobile bulk actions apply to every file and support suggested reset", () => {
+  const changes = [change("a.md"), change("b.md"), change("blocked.md", { blockedReason: "Remote revision is still changing", suggested: "skip" })];
+  const { modal } = openMobileBatch(changes);
+  try {
+    modal.contentEl.querySelectorAll(".sink-review-mobile-bulk-button")[0].click();
+    for (const row of rows(modal).slice(0, 2)) {
+      assert.equal(row.querySelector('[data-decision="keep-local"]').getAttribute("aria-pressed"), "true");
+    }
+    assert.equal(modal.contentEl.querySelector(".sink-review-mobile-summary").textContent, "3 files • 2 to apply • 1 blocked");
+
+    const skipAll = modal.contentEl.querySelectorAll(".sink-review-mobile-bulk-button")[2];
+    skipAll.click();
+    assert.equal(modal.contentEl.querySelector(".sink-review-mobile-summary").textContent, "3 files • 0 to apply • 1 blocked");
+    assert.equal(modal.contentEl.querySelector(".sink-review-apply").disabled, true);
+
+    modal.contentEl.querySelectorAll(".sink-review-mobile-bulk-button")[3].click();
+    assert.equal(modal.contentEl.querySelector(".sink-review-mobile-summary").textContent, "3 files • 2 to apply • 1 blocked");
+    assert.equal(modal.contentEl.querySelector(".sink-review-apply").disabled, false);
+    assert.equal(modal.contentEl.querySelectorAll(".sink-review-mobile-blocked").length, 1);
+  } finally {
+    modal.close();
+  }
+});
+
+test("mobile pager stays available across more than one page", () => {
+  const changes = Array.from({ length: 30 }, (_, index) => change(`note-${index}.md`));
+  const { modal } = openMobileBatch(changes);
+  try {
+    const pager = modal.contentEl.querySelector(".sink-review-pager");
+    assert.notEqual(pager.style.display, "none");
+    const status = () => modal.contentEl.querySelector(".sink-review-page-status").textContent;
+    assert.equal(status(), "1–25 of 30");
+    modal.contentEl.querySelectorAll(".sink-review-pager button")[1].click();
+    assert.equal(status(), "26–30 of 30");
+  } finally {
+    modal.close();
+  }
+});
+
+test("unified diff renders deletes and inserts in one column", () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  try {
+    renderUnifiedDiff(container, "Local", "Remote", "same\nold\nend", "same\nnew\nend");
+    const view = container.querySelector(".sink-diff-unified");
+    assert.equal(view !== null, true);
+    assert.equal(view.querySelectorAll(".sink-diff-delete").length, 1);
+    assert.equal(view.querySelectorAll(".sink-diff-insert").length, 1);
+    assert.match(view.querySelector(".sink-diff-delete").textContent, /old/);
+    assert.match(view.querySelector(".sink-diff-insert").textContent, /new/);
   } finally {
     container.remove();
   }
