@@ -8,6 +8,16 @@ interface ReleaseNote {
 
 const LATEST_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.2.23",
+    title: "Mobile Review Workspace",
+    points: [
+      "On Obsidian mobile, reviews now open as a full-screen card workspace with Local, Remote, and Skip controls on every file.",
+      "Tap a card for a detail sheet with a unified diff, consequence text, and any retained conflict revisions.",
+      "A safe-area action bar shows the effective count and applies every choice at once; bulk actions cover all files.",
+      "Desktop keeps the existing side-by-side review. Sync decisions and safety confirmations are unchanged.",
+    ],
+  },
+  {
     version: "0.2.22",
     title: "Stable Attachments and Focused Reviews",
     points: [

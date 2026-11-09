@@ -2,7 +2,7 @@
 
 ## Current implementation status
 
-This is the original design document, not a statement of release readiness. The 0.2.15 development scope is documented in [release notes](releases/0.2.15.md), with actual checks and remaining rollout gates in [verification evidence](verification/0.2.15.md). In particular, divergent edits require explicit side selection rather than the originally planned automatic three-way merge. New safety snapshots are local-only; legacy plaintext snapshot exposure requires separate remediation.
+This is the original design document, not a statement of release readiness. Current release behavior is documented in [0.2.23 release notes](releases/0.2.23.md), with actual checks and remaining rollout gates in [0.2.23 verification evidence](verification/0.2.23.md). Divergent edits require explicit side selection rather than the originally planned automatic three-way merge; desktop uses a side-by-side diff and mobile uses a full-screen card workspace with a unified diff. New safety snapshots are local-only; legacy plaintext snapshot exposure requires separate remediation.
 
 ## Overview
 
@@ -99,13 +99,15 @@ sink/
 │   │   ├── LocalDB.ts         # PouchDB wrapper
 │   │   ├── RemoteDB.ts        # CouchDB connection manager
 │   │   ├── Replicator.ts      # Continuous replication manager
-│   │   ├── ConflictResolver.ts # Auto-merge logic
+│   │   ├── ConflictResolver.ts # Retained revision analysis
 │   │   └── FileSerializer.ts  # File ↔ DB document conversion
 │   ├── ui/
 │   │   ├── SettingsTab.ts     # Single settings page
 │   │   ├── SetupWizard.ts     # 3-step setup wizard
 │   │   ├── StatusBar.ts       # Sync status indicator
-│   │   └── ConflictModal.ts   # Manual conflict resolution UI
+│   │   ├── BatchReviewModal.ts # Complete Local/Remote review, desktop + mobile
+│   │   ├── DiffView.ts        # Side-by-side and unified diffs
+│   │   └── ConflictModal.ts   # Legacy single-conflict UI
 │   └── utils/
 │       ├── crypto.ts          # E2E encryption (AES-256-GCM)
 │       ├── uri.ts             # Setup URI generation/parsing
@@ -167,10 +169,10 @@ Everything else is hardcoded to sane defaults:
 
 ### Conflict Resolution
 
-1. **Identical content** → silently discard duplicate (most common)
-2. **One side newer + other unchanged** → take newer (fast-forward)
-3. **Both modified (text)** → 3-way merge using diff-match-patch
-4. **Merge failed / binary** → create `filename.conflict.md` alongside original, notify user
+1. **Identical content** → no write; no review row
+2. **One side newer + other unchanged** → verified fast-forward
+3. **Both modified, retained revisions, binaries, or deletions** → explicit Local/Remote review with a diff
+4. **No common ancestor** → never offer merge; require a side choice
 
 No confusing "Tweaks Mismatched" popups. No surprise config overwrites.
 
@@ -254,7 +256,7 @@ No reverse proxy, no TLS certificates — Tailscale handles encryption.
 | P2P/WebRTC sync via Nostr | You have a dedicated server |
 | MinIO/S3 backend | Using CouchDB only |
 | Journal sync mode | One mode: LiveSync |
-| 10-tab settings page | Single page, 8 settings |
+| 10-tab settings page | Single page, 10 settings |
 | Periodic sync / on-save modes | Always-on live sync |
 | "Tweaks Mismatched" system | Just use latest config |
 | Separate plugin/config sync module | Sync `.obsidian/` as regular files |
@@ -300,18 +302,18 @@ No reverse proxy, no TLS certificates — Tailscale handles encryption.
 
 ## Things to Consider
 
-1. **Initial sync of large vaults** — first push of thousands of notes takes time. Need a progress indicator and batch processing.
+1. **Initial sync of large vaults** — first push of thousands of notes takes time. The plugin reports progress and processes one file at a time.
 
-2. **Binary files (images, PDFs)** — stored as base64 in CouchDB docs when >64KB, chunked. Consider a file size limit (~100MB).
+2. **Binary files (images, PDFs)** — stored as base64 in CouchDB; files above 64 KiB are chunked. Sink enforces a 20 MiB per-file safety limit.
 
-3. **`.obsidian/` config sync** — this is where the existing plugin causes the most damage. Sink will sync config files but with a "Device X updated plugin Y — apply?" prompt rather than silent overwrite.
+3. **`.obsidian/` config sync** — Sink can sync config files, but always excludes workspace state, plugin-enable lists, and its own plugin directory. It is off by default.
 
-4. **Mobile (future)** — Obsidian mobile kills background processes. The architecture supports "catch up on open" since PouchDB replication is resumable from where it left off.
+4. **Mobile** — supported on iOS and Android. Reviews use a full-screen card workspace; Obsidian may suspend background processes, so Sink catches up when the app opens.
 
 5. **Database growth** — CouchDB stores revisions. Schedule periodic compaction via cron: `curl -X POST http://admin:pass@localhost:5984/sink/_compact`
 
 6. **IndexedDB limits** — PouchDB in IndexedDB has ~2GB browser storage limits. For very large vaults with many attachments, this could be a concern.
 
-7. **Race conditions** — two devices editing same file simultaneously. The 1s debounce + CouchDB's MVCC revision system handles this; conflicts resolved automatically or flagged to user.
+7. **Race conditions** — CouchDB's MVCC revision system detects concurrent writes. Identical content and verified fast-forwards are silent; divergent edits and retained revisions require an explicit Local/Remote decision.
 
 8. **Obsidian plugin installation** — final output is 3 files (`main.js`, `manifest.json`, `styles.css`) dropped into `.obsidian/plugins/sink/`.

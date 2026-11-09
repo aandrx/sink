@@ -229,8 +229,19 @@ You need `main.js`, `manifest.json`, and `styles.css` on your device. Choose one
 **Option B — Via USB:**
 - Connect phone to computer, navigate to vault folder, copy files directly
 
-**Option C — Direct download from GitHub (if a release is published):**
-- Download the release zip, extract the three plugin files
+**Option C — Direct download from GitHub:**
+1. Open the [latest release](https://github.com/aandrx/sink/releases/latest)
+2. Download the three release assets: `main.js`, `manifest.json`, and `styles.css`
+3. Save them to the plugin folder described below
+
+**Option D — Via BRAT:**
+1. Install [BRAT](https://github.com/TfTHacker/obsidian42-brat) from the Obsidian community plugins list
+2. Open BRAT → **Add Beta Plugin**
+3. Enter `aandrx/sink` and select the latest version
+4. Enable **Sink** after BRAT finishes
+
+> BRAT downloads release assets from GitHub. If GitHub is rate-limiting or timing out, retry later or use one of the manual options above.
+> After BRAT installs, skip the next file-placement step; BRAT writes the three files into the vault itself.
 
 ### 2. Place the files in your vault
 
@@ -272,6 +283,17 @@ If you already set up a desktop device:
 Open the Setup Wizard on mobile and enter the same server URL, username, password, database name, and encryption passphrase as your other devices.
 
 > **Note:** Make sure Tailscale is running on your phone and the server's Tailscale IP is reachable. You can verify by opening `http://<tailscale-ip>:5985/` in Safari/Chrome — you should see a JSON response.
+
+### 5. Reviewing changes on mobile
+
+When sync needs a decision, Sink opens a full-screen mobile review workspace instead of the desktop split view:
+
+- Files are cards with **Local / Remote / Skip** controls.
+- Tap a card to open its detail sheet and unified diff.
+- Use the bottom **Apply N** action to apply every Local and Remote choice at once.
+- Bulk actions (All local, All remote, Skip all, Suggested) apply to the whole review.
+
+The decisions are the same as desktop. Deletions still require confirmation, and blocked rows cannot be applied. See the [0.2.23 release notes](releases/0.2.23.md) for screenshots.
 
 ---
 

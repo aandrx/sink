@@ -4,9 +4,9 @@ A minimal self-hosted sync plugin for [Obsidian](https://obsidian.md). Always-on
 
 Forked from the architecture of [obsidian-livesync](https://github.com/vrtmrz/obsidian-livesync), stripped to the essentials.
 
-## Release: 0.2.21
+## Release: 0.2.23
 
-Adds recovery actions for blocked or paused sync: Settings > Sink > Troubleshooting and the Resolve pending sync issues command. Includes the 0.2.20 UI clarity and safety work. See [0.2.21 release notes](docs/releases/0.2.21.md), [0.2.20 notes](docs/releases/0.2.20.md), [0.2.19 notes](docs/releases/0.2.19.md), [0.2.18 notes](docs/releases/0.2.18.md), [0.2.17 notes](docs/releases/0.2.17.md), [0.2.16 notes](docs/releases/0.2.16.md), and [0.2.15 notes](docs/releases/0.2.15.md). Grey-screen crash causality remains unconfirmed; use the [controlled test plan](docs/STABILITY.md) before enabling Sink in a live vault. Development checks require Node.js 22.22.2+ (Node 22 LTS recommended).
+Adds a full-screen iOS-style review workspace for Obsidian mobile: file cards, segmented Local/Remote/Skip decisions, a detail sheet with unified diffs, and a safe-area action bar. Desktop keeps the existing side-by-side review. Includes the 0.2.22 attachment-identity and focused-startup-review fixes. See [0.2.23 release notes](docs/releases/0.2.23.md), [0.2.22 notes](docs/releases/0.2.22.md), [0.2.21 notes](docs/releases/0.2.21.md), [0.2.20 notes](docs/releases/0.2.20.md), [0.2.19 notes](docs/releases/0.2.19.md), [0.2.18 notes](docs/releases/0.2.18.md), [0.2.17 notes](docs/releases/0.2.17.md), [0.2.16 notes](docs/releases/0.2.16.md), and [0.2.15 notes](docs/releases/0.2.15.md). Grey-screen crash causality remains unconfirmed; use the [controlled test plan](docs/STABILITY.md) before enabling Sink in a live vault. Development checks require Node.js 22.22.2+ (Node 22 LTS recommended).
 
 ---
 
@@ -15,11 +15,25 @@ Adds recovery actions for blocked or paused sync: Settings > Sink > Troubleshoot
 - **Live sync** — changes replicate instantly across all devices
 - **Self-hosted** — CouchDB on your own server via Docker, no third-party cloud
 - **End-to-end encryption** — AES-256-GCM with PBKDF2 key derivation (optional)
-- **Explicit conflict resolution**: choose Local or Remote with a side-by-side diff; divergent edits and retained CouchDB revisions are not silently merged
-- **Side-by-side diff viewer** — aligned local/remote lines, red/green and inline highlights, synchronized scrolling, collapsible context, and change navigation
-- **Mobile support** — works on iOS and Android via Obsidian mobile
+- **Explicit conflict resolution** — choose Local or Remote; divergent edits and retained CouchDB revisions are never silently merged
+- **Desktop diff viewer** — aligned side-by-side lines, red/green and inline highlights, synchronized scrolling, collapsible context, and change navigation
+- **Mobile review workspace** — full-screen iOS-style cards, segmented Local/Remote/Skip decisions, a detail sheet with unified diffs, and a safe-area action bar
+- **Stable attachments** — one content identity for inline, chunked, encrypted, and plaintext binaries; unchanged attachments no longer reappear in startup reviews
+- **Local safety snapshots** — the five most recent snapshots are shown in Settings; older snapshots remain stored
 - **Setup URI** — share connection settings to new devices in one paste
-- **8 settings total** — no configuration sprawl
+- **Compact settings** — ten focused options, no configuration sprawl
+
+---
+
+## Mobile review
+
+On Obsidian mobile, a sync review opens as a full-screen workspace instead of the desktop split view. Files are cards with a Local/Remote/Skip control; tapping a card opens a detail sheet with the consequence and a unified diff. Apply stays in a safe-area bottom bar.
+
+| Files | Detail |
+| --- | --- |
+| <img src="https://raw.githubusercontent.com/aandrx/sink/0.2.23/docs/releases/0.2.23/mobile-list-dark.png" width="240" alt="Mobile review file cards in dark theme"> | <img src="https://raw.githubusercontent.com/aandrx/sink/0.2.23/docs/releases/0.2.23/mobile-detail-light.png" width="240" alt="Mobile unified diff detail view in light theme"> |
+
+The decisions are identical to desktop: Local, Remote, and Skip; deletions still require confirmation; blocked rows cannot be applied. Settings and the setup wizard keep Obsidian's native mobile controls. See the [0.2.23 release notes](docs/releases/0.2.23.md) for more mockups.
 
 ---
 
@@ -92,23 +106,25 @@ For full instructions including **mobile setup** and **giving a friend access**,
 
 | Text | Meaning |
 |------|---------|
-| `Sink` | Connected, live sync active |
+| `Sink ✓` | Connected, live sync active |
 | `Sink ↑↓` | Actively syncing |
-| `Sink ✗` | Error — check credentials |
+| `Sink ⏸` | Waiting for review or upload permission; open Settings → Sink → Troubleshooting |
+| `Sink ✗` | Sync blocked; open Settings → Sink → Troubleshooting |
 | `Sink ○` | Disconnected |
 
-Hover the status bar item for a tooltip with details.
+Hover or long-press the status bar item for a tooltip with details. The status bar is the accessible status surface.
 
-**Floating overlay** (top-right of editor):
+**Floating overlay** (top-right of editor, decorative and hidden from assistive tech):
 
 | Text | Meaning |
 |------|---------|
-| `Full` | Connected and idle |
-| `Flowing` | Sync in progress |
-| `Filling  filename.md` | Receiving file from server |
-| `Draining  filename.md` | Sending file to server |
+| `Connected` | Connected and idle |
+| `Syncing` | Sync in progress |
+| `Receiving  filename.md` | Receiving a file from the server |
+| `Sending  filename.md` | Sending a file to the server |
+| `Review` | Waiting for a sync review |
 | `Blocked` | Sync error |
-| `Empty` | Disconnected |
+| `Disconnected` | Disconnected |
 
 ---
 
@@ -124,6 +140,8 @@ Hover the status bar item for a tooltip with details.
 | Sync delay | `1000ms` | Debounce time after last edit before pushing |
 | Auto-apply safe updates | `true` | Verified fast-forwards; divergent edits and deletions still require review |
 | Sync config folder | `false` | Allow config-folder sync; workspace state, plugin-enable lists, and Sink itself are always excluded |
+| Device name | generated | Friendly name shown in review and conflict metadata |
+| Device role | `Primary` | Secondary devices must confirm before uploading changes |
 
 ---
 
@@ -149,7 +167,7 @@ SyncEngine (SyncEngine.ts)
   ├── LocalDB         — PouchDB (IndexedDB) local cache
   ├── RemoteDB        — PouchDB HTTP adapter → CouchDB
   ├── Replicator      — continuous bidirectional replication
-  └── ConflictResolver — 3-way merge via diff-match-patch
+  └── ConflictResolver — retained revision analysis; explicit side choice
 ```
 
 Transport: PouchDB replication over HTTP to CouchDB 3, tunnelled over Tailscale.

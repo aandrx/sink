@@ -33,8 +33,8 @@
   - [x] Detect conflicts from PouchDB revision tree
   - [x] Auto-resolve: identical content
   - [x] Auto-resolve: fast-forward (one side unchanged)
-  - [x] Auto-resolve: 3-way text merge (diff-match-patch)
-  - [x] Fallback: manual resolution via ConflictModal
+  - [ ] Auto-resolve: 3-way text merge — intentionally not offered without a common ancestor
+  - [x] Fallback: explicit Local/Remote review via BatchReviewModal
 - [x] `src/sync/SyncEngine.ts` — Orchestration layer
   - [x] Wire together LocalDB + RemoteDB + Replicator + ConflictResolver
   - [x] Vault event listeners (create, modify, delete, rename)
@@ -61,12 +61,16 @@
   - [x] States: connected, syncing, error, disconnected, paused
   - [x] Hover tooltip showing status detail
 - [x] `src/ui/FloatingStatus.ts` — Top-right floating overlay
-  - [x] Dynamic activity text (Filling/Draining + filename) with 4s revert
-  - [x] Color-coded by status (green/blue/red/muted)
+  - [x] Activity text (Sending/Receiving + filename) with 4s revert
+  - [x] Plain status labels: Connected, Syncing, Review, Blocked, Disconnected
   - [x] Matches obsidian-livesync .livesync-status style
-- [x] `src/ui/SettingsTab.ts` — Plugin settings page (8 settings + actions)
+- [x] `src/ui/SettingsTab.ts` — Plugin settings page (10 settings + actions)
 - [x] `src/ui/SetupWizard.ts` — First-run wizard (3 steps)
-- [x] `src/ui/ConflictModal.ts` — Manual conflict resolution (two-pane diff)
+- [x] `src/ui/ConflictModal.ts` — Legacy single-conflict modal (two-pane diff)
+- [x] `src/ui/BatchReviewModal.ts` — Complete review workspace, paging, bulk actions, Local/Remote decisions
+  - [x] Desktop side-by-side diff
+  - [x] Mobile iOS-style cards, segmented decisions, detail sheet, unified diff (0.2.23)
+- [x] `src/ui/DiffView.ts` — Side-by-side and unified diff renderers
 
 ## Phase 6: Setup URI System
 - [x] `src/utils/uri.ts` — URI generation and parsing
@@ -100,7 +104,7 @@
 - [ ] File path encryption (paths visible in CouchDB if no passphrase)
 - [ ] Setup URI is base64-only — share only via secure channel (Signal, etc.)
 - [ ] No per-user CouchDB accounts — all devices share one admin credential
-- [ ] Mobile requires manual plugin file transfer (not on community plugins list)
+- [ ] Mobile requires manual or BRAT installation (not on the community plugins list)
 
 ---
 
@@ -118,7 +122,7 @@
 
 **Design principles:**
 - One sync mode (LiveSync, always on)
-- Minimal settings (8 total)
+- Compact settings (10 total)
 - Auto-reconnect on failure
-- Silent conflict resolution where possible
+- Silent only for identical content and verified fast-forwards; divergent edits require a side choice
 - No surprise config overwrites
